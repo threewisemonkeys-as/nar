@@ -1,0 +1,13 @@
+numpy
+matplotlib
+seaborn
+Pillow
+tqdm
+prettytable
+opencv-python
+torch
+PyYAML
+dill
+wandb
+plotly
+multiprocess
