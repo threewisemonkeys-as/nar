@@ -27,6 +27,7 @@ from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
 from src.training import train_transform, target_training, reconstruction_training
 from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE
+from src.utils import plot_embedding_tsne
 
 parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on image represetation')
 parser.add_argument("--transform_training_epochs", type=int, default=None, help="Perform transform training for this many epochs. Default behaviour is to load trained from data/")
@@ -138,7 +139,7 @@ if __name__=='__main__':
             batch_size=len(boards),
         )
 
-        losses, img_encoder, img_decoder = reconstruction_training(
+        losses, img_encoder_full, img_decoder_full = reconstruction_training(
             reconstruction_training_data,
             args.reconstruction_training_epochs,
             img_encoder_full,
@@ -155,8 +156,7 @@ if __name__=='__main__':
         for k in range(tn):
             t_input = single_img_tensor_represent(boards[k])[0]
             with torch.no_grad():
-                enc = img_encoder_full(t_input)
-                dec = img_decoder_full(enc)
+                dec = img_decoder_full(img_encoder_full(t_input))
             axs[0, k].imshow(np.asarray(t_input.squeeze(0).cpu()), cmap="gray")
             axs[1, k].imshow(np.asarray(dec.squeeze(0).cpu()), cmap="gray")
 
@@ -178,6 +178,10 @@ if __name__=='__main__':
         sns.heatmap(a < 0.010, ax=axs[2])
         if log_path is not None: plt.savefig(log_path.joinpath("img/threshold_map.png"))
         if run is not None: run.log({"latent_differences": wandb.Image(fig)})
+
+        fig = plot_embedding_tsne(img_encoder_full, list(reconstruction_training_data)[0], boards)
+        if log_path is not None: fig.savefig(log_path.joinpath("img/encoder_tsne.png"))        
+
 
         # save nets with pickle
         if args.save_latent:
