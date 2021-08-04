@@ -283,7 +283,7 @@ if __name__=='__main__':
         plt.yticks(np.arange(0, 1.05, 0.05))
         plt.grid()
         plt.legend()
-        if log_path is not None: plt.savefig(log_path.joinpath("ohe_latent_space_accuracy.png"))
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe/latent_space_accuracy.png"))
 
 
     #################################################
@@ -314,7 +314,7 @@ if __name__=='__main__':
 
         print("\n", results["summary"])
         if args.wandb: run.summary.extend(results["summary"])
-        if log_path is not None: pickle.dump(results, open(log_path.joinpath("eval_results.ckpt"), "wb"))
+        if log_path is not None: pickle.dump(results, open(log_path.joinpath("ohe/eval_results.ckpt"), "wb"))
 
 
     ########################################
@@ -407,7 +407,7 @@ if __name__=='__main__':
         plt.xticks(np.arange(1, max(x)+1, 1.0))
         plt.grid()
         plt.legend()
-        if log_path is not None: plt.savefig(log_path.joinpath("exhaustive_search_performance.png"))
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe/exhaustive_search_performance.png"))
         if args.wandb: run.log({"exhaustive_search_performance": fig})
 
     if args.wandb: run.finish()
