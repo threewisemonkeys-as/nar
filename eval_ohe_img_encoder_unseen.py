@@ -58,7 +58,7 @@ torch.manual_seed(args.seed)
 if mp.cpu_count() < max(args.num_cpu_training, args.num_cpu_search):
     print(f"WARNING: Not enough cpu ({mp.cpu_count()}) for desired parallelism {max(args.num_cpu_training, args.num_cpu_search)}")
 
-run = wandb.init(project="nar", entity="atharv", group="ohe") if args.wandb else None
+run = wandb.init(project="nar", entity="atharv", group="ohe_img_encoder_unseen") if args.wandb else None
 log_path = pathlib.Path(args.log_path) if args.log_path is not None else pathlib.Path(run.dir) if args.wandb else None
 data_path = pathlib.Path(args.data_path)
 

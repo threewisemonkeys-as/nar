@@ -74,7 +74,7 @@ shift_lib = dill.load(open(data_path.joinpath("libraries/shift_library0.pkl"), "
 programs_upto_20 = pickle.load(open(data_path.joinpath("programs/programs_upto_20.pkl"), "rb"))
 shift_programs_upto_6 = pickle.load(open(data_path.joinpath("programs/shift_programs_upto_6.pkl"), "rb"))
 
-shapes = ["circle", "square", "triangle", "delta"] + [f"s{i}" for i in range(16)]
+shapes = ["circle", "square", "triangle", "delta", "b", "d", "e", "g", "k", "m", "r", "s", "u", "w", "x", "z", "theta", "pi", "tau", "psi"]
 boards = generate_board_states(shapes, 1)
 
 (
