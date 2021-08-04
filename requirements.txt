@@ -11,3 +11,4 @@ dill
 wandb
 plotly
 multiprocess
+scikit-learn

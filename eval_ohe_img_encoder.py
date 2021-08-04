@@ -11,27 +11,29 @@ import dill
 import matplotlib.pyplot as plt
 import multiprocess as mp
 import numpy as np
+import torch.nn.functional as F
 import torch
 from tqdm import tqdm
 import wandb
+from sklearn.manifold import TSNE
 
 from src.datagen import (
     generate_board_states,
     generate_examples_exhaustive,
     generate_examples_random,
 )
-from src.models import apply_nn_transform, create_mlp
+from src.models import apply_nn_transform, create_mlp, ConvEncoder
 from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
-from src.training import reconstruction_training, train_transform
-from src.utils import plot_embedding_tsne
+from src.training import target_training, train_transform
+from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE
 
 
-parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on one-hot represetation')
+parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on image input one-hot output')
+parser.add_argument("--img_encoder_training_epochs", type=int, default=None, help="Perform image encoder target training with this many epcohcs")
+parser.add_argument("--save_img_encoder", action="store_true", help="Whether to save image encoder. (--img_encoder_training_epochs must be specified)")
 parser.add_argument("--transform_training_epochs", type=int, default=None, help="Perform transform training for this many epochs. Default behaviour is to load trained from data/")
-parser.add_argument("--save_transforms", action="store_true", help="Whether to save transforms. (--log_path and --transform_training_epochs must be specified)")
-parser.add_argument("--reconstruction_training_epochs", type=int, default=None, help="Perform reconstruction training to train one-hot based encoder decoder for this many epochs. Default behaviour is to load trained from data/")
-parser.add_argument("--save_latent", action="store_true", help="Whether to save encoder and decoder. (--log_path and --reconstruction_training_epochs must be specified)")
+parser.add_argument("--save_transforms", action="store_true", help="Whether to save transforms. (--transform_training_epochs must be specified)")
 parser.add_argument("--eval_n", type=int, default=None, help="Evaluate system on search with this many examples per level upto 20")
 parser.add_argument("--eval_latent_acc_n", type=int, default=None, help="Evaluate accuracy of transforms with thismany examples per level upto 20")
 parser.add_argument("--search_n", type=int, default=None, help="Evaluate search performance with thismany examples per level upto 20")
@@ -57,8 +59,7 @@ torch.manual_seed(args.seed)
 if mp.cpu_count() < max(args.num_cpu_training, args.num_cpu_search):
     print(f"WARNING: Not enough cpu ({mp.cpu_count()}) for desired parallelism {max(args.num_cpu_training, args.num_cpu_search)}")
 
-
-run = wandb.init(project="nar", entity="atharv", group="ohe") if args.wandb else None
+run = wandb.init(project="nar", entity="atharv", group="ohe_img_encoder_unseen") if args.wandb else None
 log_path = pathlib.Path(args.log_path) if args.log_path is not None else pathlib.Path(run.dir) if args.wandb else None
 data_path = pathlib.Path(args.data_path)
 
@@ -74,7 +75,7 @@ dtype = torch.float
 lib = dill.load(open(data_path.joinpath("libraries/library0.pkl"), "rb"))
 shift_lib = dill.load(open(data_path.joinpath("libraries/shift_library0.pkl"), "rb"))
 programs_upto_20 = pickle.load(open(data_path.joinpath("programs/programs_upto_20.pkl"), "rb"))
-shift_programs_upto_6 = pickle.load(open(data_path.joinpath("programs/shift_programs_upto_6.pkl"), "rb"))
+shift_programs_upto_20 = pickle.load(open(data_path.joinpath("programs/shift_programs_upto_20.pkl"), "rb"))
 
 shapes = ["circle", "square", "triangle", "delta", "b", "d", "e", "g", "k", "m", "r", "s", "u", "w", "x", "z", "theta", "pi", "tau", "psi"]
 boards = generate_board_states(shapes, 1)
@@ -95,65 +96,103 @@ ohe_loss_fn = ohe_loss_fn_creator()
 one_hot_tensor_represent = one_hot_tensor_represent_creator(device, dtype)
 one_hot_tensor_represent_cpu = one_hot_tensor_represent_creator(torch.device("cpu"), dtype)
 
-input_dim = sum(data_split)
-latent_dim = 32
+one_hot_tensor_with_unseen_represent = lambda b: one_hot_tensor_represent({("unseen", pos) if s not in shapes else (s, pos) for (s, pos) in b})
+one_hot_tensor_with_unseen_represent_cpu = lambda b: one_hot_tensor_represent_cpu({("unseen", pos) if s not in shapes else (s, pos) for (s, pos) in b})
 
-# learning rates
+latent_dim = 32
+input_dim = sum(data_split)
+img_encoder_lr = 3e-4
+tf_lr = 3e-4    
 encoder_lr = 3e-4
 decoder_lr = 3e-4
-tf_lr = 3e-4
 
+shape_map = load_shape_map("data/images")
+
+single_img_represent, single_img_tensor_represent = img_represent_fns_creator(
+    shape_map, device, dtype
+)
+_, single_img_tensor_represent_cpu = img_represent_fns_creator(
+    shape_map, torch.device("cpu"), dtype
+)
+
+
+simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
+simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
+
+simple_encoder_cpu = copy.deepcopy(simple_encoder).to(torch.device("cpu"))
+simple_decoder_cpu = copy.deepcopy(simple_decoder).to(torch.device("cpu"))
 
 if __name__=='__main__':
 
     mp.set_start_method("spawn")
 
-    ################################################
-    ### Reconstruction training for latent space ###
-    ################################################
+    ##############################
+    ### Image encoder training ###
+    ##############################
 
-    if args.reconstruction_training_epochs is not None:
+    if args.img_encoder_training_epochs is not None:
 
         # instantiate nets
-        simple_encoder = create_mlp(input_dim, latent_dim, [32]).to(dtype).to(device)
-        simple_decoder = create_mlp(latent_dim, input_dim, [32]).to(dtype).to(device)
+        img_encoder = ConvEncoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
+        img_encoder_optim = torch.optim.Adam(img_encoder.parameters(), lr=img_encoder_lr)
 
-        # instatiate optimizers
-        simple_encoder_optim = torch.optim.Adam(simple_encoder.parameters(), lr=encoder_lr)
-        simple_decoder_optim = torch.optim.Adam(simple_decoder.parameters(), lr=decoder_lr)
-
-        # training
-        reconstruction_training_data = torch.utils.data.DataLoader(
-            [one_hot_tensor_represent(b)[0].squeeze(0) for b in boards],
+        # training 
+        xs = torch.utils.data.DataLoader(
+            [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
             batch_size=len(boards),
         )
+        with torch.no_grad():
+            ys = torch.utils.data.DataLoader(
+                [
+                    simple_encoder(one_hot_tensor_with_unseen_represent(b)[0].squeeze(0))
+                    for b in boards
+                ],
+                batch_size=len(boards),
+            )
 
-        losses, simple_encoder, simple_decoder = reconstruction_training(
-            reconstruction_training_data,
-            args.reconstruction_training_epochs,
-            simple_encoder,
-            simple_encoder_optim,
-            simple_decoder,
-            simple_decoder_optim,
-            loss_fn=ohe_loss_fn,
-            noise_std=2.0,
-            logger=run,
+            
+        losses, img_encoder = target_training(
+            xs,
+            ys,
+            args.img_encoder_training_epochs,
+            img_encoder,
+            img_encoder_optim,
+            F.mse_loss,
+            0.0,
         )
 
         # save nets with pickle
-        if args.save_transforms:
-            pickle.dump(copy.deepcopy(simple_encoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/simple_encoder.pkl"), "wb"))
-            pickle.dump(copy.deepcopy(simple_decoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/simple_decoder.pkl"), "wb"))
-        
-        fig = plot_embedding_tsne(simple_encoder, list(reconstruction_training_data)[0], boards)
-        if log_path is not None: fig.savefig(log_path.joinpath("ohe/encoder_tsne.png"))        
+        if args.save_img_encoder:
+            pickle.dump(copy.deepcopy(img_encoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder.pkl"), "wb"))
+
+        def legend_without_duplicate_labels(ax):
+            handles, labels = ax.get_legend_handles_labels()
+            unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+            ax.legend(*zip(*unique))
+
+
+        # plot TSNE projection of latent embeddings of the training data (xs) using img_encoder
+        tsne = TSNE(2)
+        zs = img_encoder(list(xs)[0]).detach().cpu().numpy()
+        zs_tsne = tsne.fit_transform(zs)
+        fig, axs = plt.subplots(1, 2, figsize=(15, 10))
+        cmap1 = {shape: c for shape, c in zip(shapes, plt.get_cmap("tab20").colors)}
+        cmap2 = {pos: c for pos, c in zip(itertools.product(range(3), range(3)), plt.get_cmap("Set1").colors)}
+        for idx, b in enumerate(boards):
+            b = list(b)[0]
+            axs[0].scatter(zs_tsne[idx, 0], zs_tsne[idx, 1], label=b[0], color=cmap1[b[0]])
+            axs[1].scatter(zs_tsne[idx, 0], zs_tsne[idx, 1], label=b[1], color=cmap2[b[1]])
+        legend_without_duplicate_labels(axs[0])
+        legend_without_duplicate_labels(axs[1])
+        # axs[0].legend()
+        # axs[1].legend()
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/img_encoder_tsne.png"))        
+
 
     else:
-        simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
-        simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
+        img_encoder = pickle.load(open(data_path.joinpath("weights/img_encoder.pkl"), "rb")).to(device)
 
-    simple_encoder_cpu = copy.deepcopy(simple_encoder).to(torch.device("cpu"))
-    simple_decoder_cpu = copy.deepcopy(simple_decoder).to(torch.device("cpu"))
+    img_encoder_cpu = copy.deepcopy(img_encoder).to(torch.device("cpu"))
 
     ##########################
     ### Transform training ###
@@ -174,14 +213,14 @@ if __name__=='__main__':
             tf: torch.utils.data.DataLoader(
                 [
                     (
-                        one_hot_tensor_represent(i)[0].squeeze(0),
+                        single_img_tensor_represent(i)[0].squeeze(0),
                         one_hot_tensor_represent(lib.apply_program([tf, "out"], i))[0].squeeze(
                             0
                         ),
                     )
                     for i in boards
                 ],
-                batch_size=len(boards),
+                batch_size=36,
             )
             for tf in simple_transforms.keys()
         }
@@ -197,7 +236,7 @@ if __name__=='__main__':
                 (
                     tf_training_data,
                     num_epochs,
-                    simple_encoder,
+                    img_encoder,
                     None,
                     simple_decoder,
                     None,
@@ -225,10 +264,10 @@ if __name__=='__main__':
 
         if args.save_transforms:
             simple_transforms_cpu = {k: copy.deepcopy(v).to(torch.device("cpu")) for k, v in simple_transforms.items()}
-            pickle.dump(simple_transforms_cpu, open(data_path.joinpath("weights/simple_transforms.pkl"), "wb"))
+            pickle.dump(simple_transforms_cpu, open(data_path.joinpath("weights/ohe_img_encoder_transforms.pkl"), "wb"))
 
     else:
-        simple_transforms_path = data_path.joinpath("weights/simple_transforms.pkl")
+        simple_transforms_path = data_path.joinpath("weights/ohe_img_encoder_transforms.pkl")
         if simple_transforms_path.exists():
             simple_transforms = pickle.load(open(simple_transforms_path, "rb"))
             for t_tf in simple_transforms.values(): t_tf.to(device)
@@ -258,9 +297,9 @@ if __name__=='__main__':
         with torch.no_grad():
             results = search_test(
                 list(itertools.chain(*eval_examples)),
-                simple_encoder_cpu,
+                img_encoder_cpu,
                 simple_decoder_cpu,
-                one_hot_tensor_represent_cpu,
+                single_img_tensor_represent,
                 one_hot_tensor_represent_cpu,
                 simple_transforms_cpu,
                 apply_nn_transform,
@@ -293,7 +332,7 @@ if __name__=='__main__':
         plt.yticks(np.arange(0, 1.05, 0.05))
         plt.grid()
         plt.legend()
-        if log_path is not None: plt.savefig(log_path.joinpath("ohe/latent_space_accuracy.png"))
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/latent_space_accuracy.png"))
 
 
     #################################################
@@ -312,9 +351,9 @@ if __name__=='__main__':
         with torch.no_grad():
             results = search_test(
                 list(itertools.chain(*eval_examples)),
-                simple_encoder_cpu,
+                img_encoder_cpu,
                 simple_decoder_cpu,
-                one_hot_tensor_represent_cpu,
+                single_img_tensor_represent,
                 one_hot_tensor_represent_cpu,
                 simple_transforms_cpu,
                 apply_nn_transform,
@@ -324,7 +363,7 @@ if __name__=='__main__':
 
         print("\n", results["summary"])
         if args.wandb: run.summary.extend(results["summary"])
-        if log_path is not None: pickle.dump(results, open(log_path.joinpath("ohe/eval_results.ckpt"), "wb"))
+        if log_path is not None: pickle.dump(results, open(log_path.joinpath("ohe_img_encoder/eval_results.ckpt"), "wb"))
 
 
     ########################################
@@ -347,9 +386,9 @@ if __name__=='__main__':
                 t_search = exhaustive_search_creator(ohe_hit_check, i)
                 r, s, time_taken = t_search(
                     t_ex,
+                    single_img_tensor_represent,
                     one_hot_tensor_represent_cpu,
-                    one_hot_tensor_represent_cpu,
-                    simple_encoder_cpu,
+                    img_encoder_cpu,
                     simple_decoder_cpu,
                     simple_transforms_cpu,
                     apply_nn_transform,
@@ -379,9 +418,9 @@ if __name__=='__main__':
                         t_search,
                         args=(
                             [t_ex],
+                            single_img_tensor_represent,
                             one_hot_tensor_represent_cpu,
-                            one_hot_tensor_represent_cpu,
-                            simple_encoder_cpu,
+                            img_encoder_cpu,
                             simple_decoder_cpu,
                             simple_transforms_cpu,
                             apply_nn_transform,
@@ -417,7 +456,7 @@ if __name__=='__main__':
         plt.xticks(np.arange(1, max(x)+1, 1.0))
         plt.grid()
         plt.legend()
-        if log_path is not None: plt.savefig(log_path.joinpath("ohe/exhaustive_search_performance.png"))
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/exhaustive_search_performance.png"))
         if args.wandb: run.log({"exhaustive_search_performance": fig})
 
     if args.wandb: run.finish()
