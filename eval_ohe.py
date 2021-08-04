@@ -5,6 +5,7 @@ import itertools
 import pathlib
 import pickle
 import random
+import sys
 
 import dill
 import matplotlib.pyplot as plt
@@ -224,8 +225,14 @@ if __name__=='__main__':
             pickle.dump(simple_transforms_cpu, open(data_path.joinpath("weights/simple_transforms.pkl"), "wb"))
 
     else:
-        simple_transforms = pickle.load(open(data_path.joinpath("weights/simple_transforms.pkl"), "rb"))
-        for t_tf in simple_transforms.values(): t_tf.to(device)
+        simple_transforms_path = data_path.joinpath("weights/simple_transforms.pkl")
+        if simple_transforms_path.exists():
+            simple_transforms = pickle.load(open(simple_transforms_path, "rb"))
+            for t_tf in simple_transforms.values(): t_tf.to(device)
+
+        else:
+            print("Could not find transforms. Cannot procceed further. Exiting script ...")
+            sys.exit(1)
 
     simple_transforms_cpu = {k: copy.deepcopy(v).to(torch.device("cpu")) for k, v in simple_transforms.items()}
 
