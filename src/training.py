@@ -62,6 +62,65 @@ def reconstruction_training(
     return losses, encoder, decoder
 
 
+
+def multi_reconstruction_training(
+    data: list,
+    epochs: int,
+    encoder: nn.Module,
+    encoder_optim: torch.optim.Optimizer,
+    decoders: List[nn.Module],
+    decoder_optims: List[torch.optim.Optimizer],
+    loss_fns: List[nn.Module],
+    loss_weights: List[float],
+    noise_std: float = 0.0,
+    logger=None,
+    contrastive: bool = False,
+):
+    """Trains an encoder and set of decoder for multiple reconstructions"""
+    # initialise loss tracker
+    losses = []
+
+    # clarification: one epoch = one pass over complete dataset
+    for e in tqdm(range(epochs)):
+
+        t_loss = 0
+
+        for i, (x, ys) in enumerate(data):
+
+            if noise_std != 0.0:
+                input_noise = torch.randn_like(x) * noise_std
+            else:
+                input_noise = 0.0
+
+            r = x + input_noise
+            r = encoder(r)
+            # r += (torch.randn_like(r) * noise_std) if noise_std != 0.0 else 0.0
+            rs = [decoder(r) for decoder in decoders]
+            loss = sum([w*loss_fn(r, y) for w, loss_fn, r, y in zip(loss_weights, loss_fns, rs, ys)])
+
+            if contrastive:
+                pass
+
+            for o in [encoder_optim] + decoder_optims:
+                if o is not None:
+                    o.zero_grad()
+
+            loss.backward()
+
+            for o in [encoder_optim] + decoder_optims:
+                if o is not None:
+                    o.step()
+
+            t_loss += loss.item()
+
+        if logger is not None:
+            logger.log({"epoch": e, "loss/reconstruction": t_loss})
+
+        losses.append(t_loss)
+
+    return losses, encoder, decoders
+
+
 def target_training(
     xs: torch.utils.data.DataLoader,
     ys: torch.utils.data.DataLoader,

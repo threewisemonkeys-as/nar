@@ -8,6 +8,7 @@ import random
 import sys
 
 import dill
+import seaborn as sns
 import matplotlib.pyplot as plt
 import multiprocess as mp
 import numpy as np
@@ -22,16 +23,19 @@ from src.datagen import (
     generate_examples_exhaustive,
     generate_examples_random,
 )
-from src.models import apply_nn_transform, create_mlp, ConvEncoder
+from src.models import ConvDecoder, apply_nn_transform, create_mlp, ConvEncoder
 from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
 from src.training import target_training, train_transform
 from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE
+from src.utils import plot_embedding_tsne
 
 
 parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on image input one-hot output')
 parser.add_argument("--img_encoder_training_epochs", type=int, default=None, help="Perform image encoder target training with this many epcohcs")
 parser.add_argument("--save_img_encoder", action="store_true", help="Whether to save image encoder. (--img_encoder_training_epochs must be specified)")
+parser.add_argument("--img_decoder_training_epochs", type=int, default=None, help="Perform image decoder target training with this many epcohcs")
+parser.add_argument("--save_img_decoder", action="store_true", help="Whether to save image decoder. (--img_decoder_training_epochs must be specified)")
 parser.add_argument("--transform_training_epochs", type=int, default=None, help="Perform transform training for this many epochs. Default behaviour is to load trained from data/")
 parser.add_argument("--save_transforms", action="store_true", help="Whether to save transforms. (--transform_training_epochs must be specified)")
 parser.add_argument("--eval_n", type=int, default=None, help="Evaluate system on search with this many examples per level upto 20")
@@ -102,6 +106,7 @@ one_hot_tensor_with_unseen_represent_cpu = lambda b: one_hot_tensor_represent_cp
 latent_dim = 32
 input_dim = sum(data_split)
 img_encoder_lr = 3e-4
+img_decoder_lr = 3e-4
 tf_lr = 3e-4    
 encoder_lr = 3e-4
 decoder_lr = 3e-4
@@ -114,7 +119,6 @@ single_img_represent, single_img_tensor_represent = img_represent_fns_creator(
 _, single_img_tensor_represent_cpu = img_represent_fns_creator(
     shape_map, torch.device("cpu"), dtype
 )
-
 
 simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
 simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
@@ -165,34 +169,85 @@ if __name__=='__main__':
         if args.save_img_encoder:
             pickle.dump(copy.deepcopy(img_encoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder.pkl"), "wb"))
 
-        def legend_without_duplicate_labels(ax):
-            handles, labels = ax.get_legend_handles_labels()
-            unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
-            ax.legend(*zip(*unique))
-
-
-        # plot TSNE projection of latent embeddings of the training data (xs) using img_encoder
-        tsne = TSNE(2)
-        zs = img_encoder(list(xs)[0]).detach().cpu().numpy()
-        zs_tsne = tsne.fit_transform(zs)
-        fig, axs = plt.subplots(1, 2, figsize=(15, 10))
-        cmap1 = {shape: c for shape, c in zip(shapes, plt.get_cmap("tab20").colors)}
-        cmap2 = {pos: c for pos, c in zip(itertools.product(range(3), range(3)), plt.get_cmap("Set1").colors)}
-        for idx, b in enumerate(boards):
-            b = list(b)[0]
-            axs[0].scatter(zs_tsne[idx, 0], zs_tsne[idx, 1], label=b[0], color=cmap1[b[0]])
-            axs[1].scatter(zs_tsne[idx, 0], zs_tsne[idx, 1], label=b[1], color=cmap2[b[1]])
-        legend_without_duplicate_labels(axs[0])
-        legend_without_duplicate_labels(axs[1])
-        # axs[0].legend()
-        # axs[1].legend()
-        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/img_encoder_tsne.png"))        
-
+        fig = plot_embedding_tsne(simple_encoder, list(xs)[0], boards)
+        if log_path is not None: fig.savefig(log_path.joinpath("ohe_img_encoder/img_encoder_tsne.png"))        
 
     else:
         img_encoder = pickle.load(open(data_path.joinpath("weights/img_encoder.pkl"), "rb")).to(device)
 
     img_encoder_cpu = copy.deepcopy(img_encoder).to(torch.device("cpu"))
+
+    ##############################
+    ### Image decoder training ###
+    ##############################
+
+    if args.img_decoder_training_epochs is not None:
+
+        # instantiate nets
+        img_decoder = ConvDecoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
+        img_decoder_optim = torch.optim.Adam(img_decoder.parameters(), lr=img_decoder_lr)
+
+        # training 
+        ys = torch.utils.data.DataLoader(
+            [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
+            batch_size=len(boards),
+        )
+        with torch.no_grad():
+            xs = torch.utils.data.DataLoader(
+                [
+                    simple_encoder(one_hot_tensor_with_unseen_represent(b)[0].squeeze(0))
+                    for b in boards
+                ],
+                batch_size=len(boards),
+            )
+
+            
+        losses, img_decoder = target_training(
+            xs,
+            ys,
+            args.img_decoder_training_epochs,
+            img_decoder,
+            img_decoder_optim,
+            F.mse_loss,
+            0.0,
+        )
+
+        # save nets with pickle
+        if args.save_img_decoder:
+            pickle.dump(copy.deepcopy(img_decoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_decoder.pkl"), "wb"))
+
+        tn = len(boards)
+        fig, axs = plt.subplots(2, tn, figsize=(2 * tn, 4))
+        for k in range(tn):
+            t_input = single_img_tensor_represent(boards[k])[0]
+            with torch.no_grad():
+                dec = img_decoder(img_encoder(t_input))
+            axs[0, k].imshow(np.asarray(t_input.squeeze(0).cpu()), cmap="gray")
+            axs[1, k].imshow(np.asarray(dec.squeeze(0).cpu()), cmap="gray")
+
+        a = np.zeros((tn, tn))
+        for i, j in itertools.product(range(tn), range(tn)):
+            g, t = [single_img_tensor_represent(k)[0] for k in [boards[i], boards[j]]]
+            g = img_decoder(img_encoder(g))
+            a[i, j] = F.mse_loss(g, t)
+
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/reconstruction.png"))
+        if run is not None: run.log({"reconstructions": wandb.Image(fig)})
+
+        fig, axs = plt.subplots(1, 3, figsize=(30, 8))
+        axs[0].set_title("Full")
+        sns.heatmap(a, ax=axs[0])
+        axs[1].set_title("< 0.010")
+        sns.heatmap(a < 0.020, ax=axs[1])
+        axs[2].set_title("< 0.005")
+        sns.heatmap(a < 0.010, ax=axs[2])
+        if log_path is not None: plt.savefig(log_path.joinpath("ohe_img_encoder/threshold_map.png"))
+        if run is not None: run.log({"latent_differences": wandb.Image(fig)})
+
+    else:
+        img_decoder = pickle.load(open(data_path.joinpath("weights/img_decoder.pkl"), "rb")).to(device)
+
+    img_decoder_cpu = copy.deepcopy(img_decoder).to(torch.device("cpu"))
 
     ##########################
     ### Transform training ###

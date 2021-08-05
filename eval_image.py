@@ -25,7 +25,7 @@ from src.datagen import (
 from src.models import apply_nn_transform, create_mlp, ConvEncoder, ConvDecoder
 from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
-from src.training import train_transform, target_training, reconstruction_training
+from src.training import train_transform, multi_reconstruction_training, reconstruction_training
 from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE
 from src.utils import plot_embedding_tsne
 
@@ -114,6 +114,11 @@ _, single_img_tensor_represent_cpu = img_represent_fns_creator(
     shape_map, torch.device("cpu"), dtype
 )
 
+simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
+simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
+
+simple_encoder_cpu = copy.deepcopy(simple_encoder).to(torch.device("cpu"))
+simple_decoder_cpu = copy.deepcopy(simple_decoder).to(torch.device("cpu"))
 
 if __name__=='__main__':
 
@@ -134,20 +139,48 @@ if __name__=='__main__':
         img_decoder_full_optim = torch.optim.Adam(img_decoder_full.parameters(), lr=decoder_lr)
 
         # training
-        reconstruction_training_data = torch.utils.data.DataLoader(
+        board_images = torch.utils.data.DataLoader(
             [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
             batch_size=len(boards),
         )
 
-        losses, img_encoder_full, img_decoder_full = reconstruction_training(
+        # reconstruction_training_data = board_images
+        # losses, img_encoder_full, img_decoder_full = reconstruction_training(
+        #     reconstruction_training_data,
+        #     args.reconstruction_training_epochs,
+        #     img_encoder_full,
+        #     img_encoder_full_optim,
+        #     img_decoder_full,
+        #     img_decoder_full_optim,
+        #     loss_fn=F.mse_loss,
+        #     noise_std=2.0,
+        #     logger=run,
+        # )
+
+        reconstruction_training_data = torch.utils.data.DataLoader(
+            [   
+                (
+                    single_img_tensor_represent(i)[0].squeeze(0),
+                    (
+                        single_img_tensor_represent(i)[0].squeeze(0),
+                        one_hot_tensor_represent(i)[0].squeeze(0)
+                    )         
+                )
+                for i in boards
+            ],
+            batch_size=len(boards)
+        )
+
+        losses, img_encoder_full, (img_decoder_full, _) = multi_reconstruction_training(
             reconstruction_training_data,
             args.reconstruction_training_epochs,
             img_encoder_full,
             img_encoder_full_optim,
-            img_decoder_full,
-            img_decoder_full_optim,
-            loss_fn=F.mse_loss,
-            noise_std=2.0,
+            [img_decoder_full, simple_decoder],
+            [img_decoder_full_optim],
+            loss_fns=[F.mse_loss, ohe_loss_fn],
+            loss_weights=[1, 0.5],
+            noise_std=0.2,
             logger=run,
         )
 
@@ -179,7 +212,7 @@ if __name__=='__main__':
         if log_path is not None: plt.savefig(log_path.joinpath("img/threshold_map.png"))
         if run is not None: run.log({"latent_differences": wandb.Image(fig)})
 
-        fig = plot_embedding_tsne(img_encoder_full, list(reconstruction_training_data)[0], boards)
+        fig = plot_embedding_tsne(img_encoder_full, list(board_images)[0], boards)
         if log_path is not None: fig.savefig(log_path.joinpath("img/encoder_tsne.png"))        
 
 
