@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import multiprocess as mp
 import numpy as np
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 import wandb
 
@@ -141,7 +142,7 @@ if __name__=='__main__':
         )
 
         # save nets with pickle
-        if args.save_transforms:
+        if args.save_latent:
             pickle.dump(copy.deepcopy(simple_encoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/simple_encoder.pkl"), "wb"))
             pickle.dump(copy.deepcopy(simple_decoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/simple_decoder.pkl"), "wb"))
         
