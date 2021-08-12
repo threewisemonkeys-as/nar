@@ -1,9 +1,12 @@
+from .image import POS_GRID, extract_shape_from_image, IMG_SIZE
 import pickle
 
 import yaml
 from prettytable import PrettyTable
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
+
+from PIL import Image
 
 
 def save_as_yaml(obj, path):
@@ -29,6 +32,35 @@ def apply_transform_program(
         else:
             m = [apply_transform(transforms[tf], elem) for elem in m]
     return [decoder(e) for e in o]
+
+
+def apply_transform_program_raw(
+    p, inp, encoder, decoder, transforms, apply_transform
+):
+    i = [(idx, encoder(e)) for idx, e in enumerate(inp)]
+    m = i.copy()
+    o = []
+
+    for tf in p:
+        if tf == "out":
+            o.extend(m)
+        elif tf == "clear":
+            m = i.copy()
+        else:
+            m = [(idx, apply_transform(transforms[tf], elem)) for (idx, elem) in m]
+    return [(idx, decoder(e)) for idx, e in o]
+
+
+def visualise_example_with_unseen(inp, out, ohe_decode):
+    shapes = {i[0]: extract_shape_from_image(i[1]) for i in inp}
+    board = ohe_decode([o[1] for o in out])
+
+    bg = Image.new("RGB", IMG_SIZE, (255, 255, 255))
+    for idx, elem in enumerate(board):
+        bg.paste(shapes[out[idx][0]], box=tuple(POS_GRID[elem[1]]))
+
+    return bg
+
 
 
 def count_parameters(model, display_table=True, return_val=False):

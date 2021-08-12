@@ -1,0 +1,5 @@
+type: image
+examples:
+  - input: i1.png
+    output: i2.png
+query: i3.png

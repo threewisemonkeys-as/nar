@@ -111,6 +111,106 @@ def exhaustive_search_creator(hit_check, max_depth: int = None, timeout: int = N
     return exhaustive_search
 
 
+def exhaustive_search_raw_creator(hit_check, max_depth: int = None, timeout: int = None):
+    """Creates a search function given a way to check hits
+    and maximum search depth and timeout (whichever expired first).
+    """
+    assert not (
+        max_depth is None and timeout is None
+    ), "must specify either timeout or max_depth"
+
+    def exhaustive_search_raw(
+        examples,
+        encoder,
+        decoder,
+        transforms,
+        apply_transform,
+    ):
+        start_time = time.time()
+
+        n_examples = len(examples)
+
+        # set input (i) and as encoding of given inputs
+        i = [
+            [encoder(elem) for elem in e[f"input"]]
+            for e in examples
+        ]
+
+        # extract list of outputs
+        o = [e[f"output"] for e in examples]
+
+        # create deque to store frontier and add empty element
+        # with memory intialised to input
+        pq = collections.deque()
+        pq.append([[], [[i_k.copy(), [], []] for i_k in i]])
+
+        # list of transforms used to extend the search
+        tfs = list(transforms.keys()) + ["out", "clear"]
+
+        while True:
+            # pop from frontier
+            h = pq.popleft()
+
+            # if max length reached then exit
+            if max_depth is not None:
+                if len(h[0]) == max_depth:
+                    result = "max_depth"
+                    break
+
+            # if timeout is reached then exit
+            if timeout is not None:
+                if (time.time() - start_time) > timeout:
+                    result = "timeout"
+                    break
+
+            # extend for each transforms
+            for tf in tfs:
+
+                # create new element from popped element
+                c = [h[0].copy(), [[h_k_i.copy() for h_k_i in h_k] for h_k in h[1]]]
+
+                # append transform to program of current element
+                c[0].append(tf)
+
+                # if transform is out, then decode things
+                # in the memory and move to output
+                if tf == "out":
+                    for k in range(n_examples):
+                        new = [decoder(e) for e in c[1][k][0]]
+                        c[1][k][1] += new
+
+                # if transform is clear, then move input to memory
+                elif tf == "clear":
+                    for k in range(n_examples):
+                        c[1][k][0] = i[k].copy()
+
+                # otherwise, execute transform on memory
+                else:
+                    # get the N.N. (or vector) for this transform
+                    tf_val = transforms[tf]
+
+                    # apply it to each element in the memory
+                    for k in range(n_examples):
+                        c[1][k][0] = [
+                            apply_transform(tf_val, elem) for elem in c[1][k][0]
+                        ]
+
+                # check if we have a hit.
+                if all([hit_check(c[1][k][1], o[k]) for k in range(n_examples)]):
+                    return "success", c, time.time() - start_time
+
+                # if we dont have a hit, then add to frontier and carry on search
+                pq.append(c)
+
+            # remove previously popped element from memory
+            del h
+        return result, None, time.time() - start_time
+
+    return exhaustive_search_raw
+
+
+
+
 def pruned_search_creator(
     single_object_hit_check, max_depth: int = None, timeout: int = None
 ):
@@ -248,6 +348,142 @@ def pruned_search_creator(
         return result, None, time.time() - start_time
 
     return pruned_search
+
+
+
+def pruned_search_raw_creator(
+    shape_match_check, single_object_hit_check, max_depth: int = None, timeout: int = None
+):
+    """Creates a search function given a way to check hits
+    and maximum search depth.
+    """
+
+    assert not (
+        max_depth is None and timeout is None
+    ), "must specify either timeout or max_depth"
+
+    def pruned_search_raw(
+        examples,
+        encoder,
+        decoder,
+        transforms,
+        apply_transform,
+    ):
+        start_time = time.time()
+
+        n_examples = len(examples)
+
+        # set input (i) and as encoding of given inputs
+        i = [
+            [(idx, encoder(elem)) for idx, elem in e[f"input"]]
+            for e in examples
+        ]
+
+        o = [e["output"] for e in examples]
+        
+        # create deque to store frontier and add empty element
+        # with memory intialised to input
+        pq = collections.deque()
+        pq.append([[], [[i[k].copy(), [], o[k].copy()] for k in range(n_examples)]])
+        # node: [program, [(memory, output, left_to_match) for each example] ]
+
+        min_lens = [len(o_k) for o_k in o]
+
+        # list of transforms used to extend the search
+        tfs = list(transforms.keys()) + ["out", "clear"]
+
+        
+        cc = 0
+
+        while True:
+            # pop from frontier
+            h = pq.popleft()
+
+            # if max length reached then exit
+            if max_depth is not None:
+                if len(h[0]) == max_depth:
+                    result = "max_depth"
+                    break
+
+            # if timeout is reached then exit
+            if timeout is not None:
+                if (time.time() - start_time) > timeout:
+                    result = "timeout"
+                    break
+
+            # prune branches not reducing target set
+            if any([len(h[1][k][2]) > min_lens[k] for k in range(n_examples)]):
+                t_tfs = ["out"]
+            else:
+                t_tfs = tfs
+
+            # extend for each transforms
+            for tf in t_tfs:
+
+                # create new element from popped element
+                c = [h[0].copy(), [[h_k_i.copy() for h_k_i in h_k] for h_k in h[1]]]
+
+                # append transform to program of current element
+                c[0].append(tf)
+
+                match_elem = None
+
+                # if transform is out, then decode things
+                # in the memory and move to output
+                if tf == "out":
+     
+                    for k in range(n_examples):
+                        new = [(idx, decoder(e)) for idx, e in c[1][k][0]]
+                        c[1][k][1] += new
+
+                        # check if generated set is still subset of target set
+                        if len(c[1][k][1]) > len(o[k]):
+                            continue
+                        for g in new:
+                            match_elem = False
+                            for ti, t in enumerate(c[1][k][2]):
+                                if t[0] == g[0] and single_object_hit_check(t[1], g[1]):
+                                    match_elem = True
+                                    c[1][k][2].pop(ti)
+                                    break
+                            if not match_elem:
+                                break
+
+                        if not match_elem:
+                            break
+
+                        if len(c[1][k][2]) == 0:
+                            return "success", c, time.time() - start_time
+
+                    # update minimum size of target set
+                    c_lens = [len(c[1][k][2]) for k in range(n_examples)]
+                    if all([c_lens[k] <= min_lens[k] for k in range(n_examples)]):
+                        min_lens = c_lens
+
+                # if transform is clear, then move input to memory
+                elif tf == "clear":
+                    for k in range(n_examples):
+                        c[1][k][0] = i[k].copy()
+
+                # otherwise, execute transform on memory
+                else:
+                    # get the N.N. (or vector) for this transform
+                    tf_val = transforms[tf]
+
+                    # apply it to each element in the memory
+                    for k in range(n_examples):
+                        c[1][k][0] = [
+                            (idx, apply_transform(tf_val, elem)) for idx, elem in c[1][k][0]
+                        ]
+
+                if match_elem is None or match_elem is True:
+                    pq.append(c)
+
+            del h
+        return result, None, time.time() - start_time
+
+    return pruned_search_raw
+
 
 
 def guided_beam_search_creator(
