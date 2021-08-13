@@ -11,7 +11,7 @@ import wandb
 from src.models import apply_nn_transform
 from src.ohe import ohe_fns_creator
 from src.search import pruned_search_raw_creator
-from src.image import  image_equality_check, homography_image_match_creator, load_img, split_image
+from src.image import  homography_image_match_creator, load_img, split_image
 from src.utils import apply_transform_program_raw, visualise_example_with_unseen
 
 
@@ -39,7 +39,7 @@ data_path = pathlib.Path(args.data_path)
 
 if log_path is not None: log_path.mkdir(parents=True, exist_ok=True)
 
-device = torch.device("cpu") # if (not torch.cuda.is_available()) or not args.use_gpu else f"cuda:{args.gpu_id}")
+device = torch.device("cpu") 
 dtype = torch.float
 
 ################################
@@ -70,8 +70,7 @@ for tf in transforms.values(): tf.eval()
     one_hot_tensor_represent_creator,
 ) = ohe_fns_creator(["unseen"], 3)
 
-h_img_match = homography_image_match_creator(0.5)
-search_fn = pruned_search_raw_creator(h_img_match, single_object_ohe_hit_check, args.max_depth, args.timeout)
+search_fn = pruned_search_raw_creator(single_object_ohe_hit_check, args.max_depth, args.timeout)
 
 
 ##########################
@@ -99,6 +98,8 @@ else:
 ### Preprocess the data ###
 ###########################
 
+h_img_match = homography_image_match_creator(0.5)
+
 for tidx, e in enumerate(task["examples"]):
     o_tags = []
     t_i_imgs = split_image(e["input"])
@@ -106,7 +107,7 @@ for tidx, e in enumerate(task["examples"]):
     for t_o_img in t_o_imgs:
         t_match = False
         for i_idx, t_i_img in enumerate(t_i_imgs):
-            if(image_equality_check(t_o_img, t_i_img)):
+            if(h_img_match(t_o_img, t_i_img)):
                 t_match = True 
                 o_tags.append(i_idx)
                 break
@@ -140,7 +141,6 @@ print("Completed!")
 
 print(f"\tResult: {r[0]}\n\tFound: {r[1][0]}\n\tTime taken: {r[2]:.5f} s\n")
 
-
 ######################
 ### Apply to query ###
 ######################
@@ -158,6 +158,6 @@ f = apply_transform_program_raw(
     transforms,
     apply_nn_transform,
 )
+
 out = visualise_example_with_unseen(list(enumerate(split_image(task["query"]))), f, ohe_decode)
 out.show()
-

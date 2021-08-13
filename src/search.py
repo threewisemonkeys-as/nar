@@ -350,9 +350,8 @@ def pruned_search_creator(
     return pruned_search
 
 
-
 def pruned_search_raw_creator(
-    shape_match_check, single_object_hit_check, max_depth: int = None, timeout: int = None
+    single_object_hit_check, max_depth: int = None, timeout: int = None
 ):
     """Creates a search function given a way to check hits
     and maximum search depth.

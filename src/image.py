@@ -169,8 +169,8 @@ def img_represent_fns_creator(
 
     return single_img_represent, single_img_tensor_represent
 
-MAX_FEATURES = 500
-GOOD_MATCH_PERCENT = 0.15
+MAX_FEATURES = 50000
+GOOD_MATCH_PERCENT = 0.5
 
 def homography(im1: Image.Image, im2: Image.Image):
 
@@ -181,11 +181,11 @@ def homography(im1: Image.Image, im2: Image.Image):
     im2Gray = np.asarray(im2.convert("L"))
 
     _,im1Gray = cv2.threshold(im1Gray, 110, 255, cv2.THRESH_BINARY)
-    _,im2Gray = cv2.threshold(im1Gray, 110, 255, cv2.THRESH_BINARY)
+    _,im2Gray = cv2.threshold(im2Gray, 110, 255, cv2.THRESH_BINARY)
 
     # Detect ORB features and compute descriptors.
-    orb = cv2.ORB_create(MAX_FEATURES)
-    keypoints1, descriptors1 = orb.detectAndCompute(im1Gray,None)
+    orb = cv2.ORB_create(MAX_FEATURES, edgeThreshold=2)
+    keypoints1, descriptors1 = orb.detectAndCompute(im1Gray, None)
     keypoints2, descriptors2 = orb.detectAndCompute(im2Gray, None)
 
     # Match features.
@@ -212,7 +212,6 @@ def homography(im1: Image.Image, im2: Image.Image):
         points2[i, :] = keypoints2[match.trainIdx].pt
 
     # Find homography
-    print(points1, points2)
     h, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
 
     # # Use homography
@@ -248,7 +247,7 @@ def homography_image_match_creator(thresh: float):
         im1, im2 = (extract_shape_from_image(i) for i in (im1, im2))
         h = homography(im1, im2)
         v = np.linalg.norm(h - np.eye(*h.shape))
-        return v > thresh
+        return v < thresh
 
     return homography_image_match
 
