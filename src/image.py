@@ -170,7 +170,7 @@ def img_represent_fns_creator(
     return single_img_represent, single_img_tensor_represent
 
 MAX_FEATURES = 50000
-GOOD_MATCH_PERCENT = 0.5
+GOOD_MATCH_PERCENT = 0.75
 
 def homography(im1: Image.Image, im2: Image.Image):
 
@@ -184,7 +184,7 @@ def homography(im1: Image.Image, im2: Image.Image):
     _,im2Gray = cv2.threshold(im2Gray, 110, 255, cv2.THRESH_BINARY)
 
     # Detect ORB features and compute descriptors.
-    orb = cv2.ORB_create(MAX_FEATURES, edgeThreshold=2)
+    orb = cv2.ORB_create(MAX_FEATURES, edgeThreshold=1)
     keypoints1, descriptors1 = orb.detectAndCompute(im1Gray, None)
     keypoints2, descriptors2 = orb.detectAndCompute(im2Gray, None)
 
@@ -243,13 +243,16 @@ def extract_shape_from_image(im: Image.Image) -> Image.Image:
 
 
 def homography_image_match_creator(thresh: float):
-    def homography_image_match(im1, im2):
+    def homography_image_match(im1: Image.Image, im2: Image.Image) -> bool:
         im1, im2 = (extract_shape_from_image(i) for i in (im1, im2))
         h = homography(im1, im2)
         v = np.linalg.norm(h - np.eye(*h.shape))
         return v < thresh
 
     return homography_image_match
+
+def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
+    return Image.fromarray((tensor * 255).squeeze(0).detach().cpu().numpy().astype(np.uint8))
 
 def image_equality_check(im1: Image.Image, im2: Image.Image):
     """Checks if two images are exactly the same"""
@@ -263,31 +266,80 @@ def image_equality_check(im1: Image.Image, im2: Image.Image):
 
     return (im1Gray == im2Gray).all()
 
-single_object_img_hit_check_creator = (
+single_object_img_mse_hit_check_creator = (
     lambda thresh: lambda i1, i2: F.mse_loss(i1, i2) <= thresh
 )
 
+def get_homography_distance(im1, im2):
+        im1, im2 = tensor_to_pil(im1), tensor_to_pil(im2)
+        try:
+            h = homography(im1, im2)
+        except cv2.error:
+            h = None
+        if h is None: return np.inf
+        v = np.linalg.norm(h - np.eye(*h.shape))
+        return v
+
+def single_object_img_homography_hit_check_creator(thresh: float):
+    def single_object_img_homography_hit_check(im1: torch.Tensor, im2: torch.Tensor):
+        v = get_homography_distance(im1, im2)
+        return v < thresh
+    return single_object_img_homography_hit_check
 
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float
 
-    for shape in ["square", "square", "triangle", "circle", "delta"]:
-        shape_img = draw_simple_shape(shape)
-        shape_img.save(f"data/images/{shape}.png")
+    # for shape in ["square", "square", "triangle", "circle", "delta"]:
+    #     shape_img = draw_simple_shape(shape)
+    #     shape_img.save(f"data/images/{shape}.png")
 
     shape_map = load_shape_map("data/images")
 
-    board = [("triangle", (0, 0)), ("circle", (1, 1)), ("x", (2, 2))]
-    draw_board(board, shape_map).show()
+    # board = [("triangle", (0, 0)), ("circle", (1, 1)), ("x", (2, 2))]
+    # draw_board(board, shape_map).show()
 
     single_img_represent, single_img_tensor_represent = img_represent_fns_creator(
         shape_map, device, dtype
     )
 
-    board_img_tensors = single_img_tensor_represent(board)
-    fig, axs = plt.subplots(1, 3)
-    for n in range(len(board)):
-        axs[n].imshow(np.asarray(board_img_tensors[n].squeeze(0).cpu()), cmap="gray")
-    plt.show()
+    # board_img_tensors = single_img_tensor_represent(board)
+    # fig, axs = plt.subplots(1, 3)
+    # for n in range(len(board)):
+    #     axs[n].imshow(np.asarray(board_img_tensors[n].squeeze(0).cpu()), cmap="gray")
+    # plt.show()
+
+    board1 = single_img_tensor_represent([("triangle", (0, 0))])
+    board2 = single_img_tensor_represent([("circle", (1, 0))])
+    print(get_homography_distance(board1[0], board2[0]))
+
+    from tqdm import tqdm
+    import itertools
+    from .datagen import generate_board_states
+    import seaborn as sns
+
+    boards = generate_board_states(list(shape_map.keys()), 1)
+    tn = len(boards)
+
+    a = np.zeros((tn, tn))
+    for i, j in tqdm(list(itertools.product(range(tn), range(tn)))):
+        g, t = [single_img_tensor_represent(k)[0] for k in [boards[i], boards[j]]]
+        # a[i, j] = F.mse_loss(g, t)
+        a[i, j] = get_homography_distance(g, t)
+
+        if i == j and a[i, j] > 0.1:
+            print(boards[i])
+        
+    fig, axs = plt.subplots(1, 4, figsize=(40, 8))
+
+    axs[0].set_title("Full")
+    sns.heatmap(a, ax=axs[0])
+    axs[1].set_title("< 1")
+    sns.heatmap(a < 1, ax=axs[1])
+    axs[2].set_title("< 0.5")
+    sns.heatmap(a < 0.5, ax=axs[2])
+    axs[3].set_title("< 0.01")
+    sns.heatmap(a < 0.01, ax=axs[3])
+
+    plt.savefig("t_threshold_map.png")

@@ -26,7 +26,7 @@ from src.models import apply_nn_transform, create_mlp, ConvEncoder, ConvDecoder
 from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
 from src.training import train_transform, multi_reconstruction_training, reconstruction_training
-from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE
+from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE, single_object_img_mse_hit_check_creator, get_homography_distance, single_object_img_homography_hit_check_creator
 from src.utils import plot_embedding_tsne
 
 parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on image represetation')
@@ -34,6 +34,7 @@ parser.add_argument("--transform_training_epochs", type=int, default=None, help=
 parser.add_argument("--save_transforms", action="store_true", help="Whether to save transforms. (--log_path and --transform_training_epochs must be specified)")
 parser.add_argument("--reconstruction_training_epochs", type=int, default=None, help="Perform reconstruction training to train one-hot based encoder decoder for this many epochs. Default behaviour is to load trained from data/")
 parser.add_argument("--save_latent", action="store_true", help="Whether to save encoder and decoder. (--log_path and --reconstruction_training_epochs must be specified)")
+parser.add_argument("--plot_latent", action="store_true", help="Whether to plot reconstruction and threshold maps")
 parser.add_argument("--eval_n", type=int, default=None, help="Evaluate system on search with this many examples per level upto 20")
 parser.add_argument("--eval_latent_acc_n", type=int, default=None, help="Evaluate accuracy of transforms with thismany examples per level upto 20")
 parser.add_argument("--search_n", type=int, default=None, help="Evaluate search performance with thismany examples per level upto 20")
@@ -99,7 +100,10 @@ one_hot_tensor_represent_cpu = one_hot_tensor_represent_creator(torch.device("cp
 one_hot_tensor_with_unseen_represent = lambda b: one_hot_tensor_represent({("unseen", pos) if s not in shapes else (s, pos) for (s, pos) in b})
 one_hot_tensor_with_unseen_represent_cpu = lambda b: one_hot_tensor_represent_cpu({("unseen", pos) if s not in shapes else (s, pos) for (s, pos) in b})
 
-latent_dim = 32
+single_object_img_hit_check = single_object_img_mse_hit_check_creator(0.002)
+single_object_img_homography_hit_check = single_object_img_homography_hit_check_creator(0.05)
+
+latent_dim = 64
 input_dim = sum(data_split)
 tf_lr = 3e-4    
 encoder_lr = 3e-4
@@ -114,8 +118,11 @@ _, single_img_tensor_represent_cpu = img_represent_fns_creator(
     shape_map, torch.device("cpu"), dtype
 )
 
-simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
-simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
+# simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
+# simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
+
+simple_encoder = create_mlp(input_dim, latent_dim, [32]).to(dtype).to(device)
+simple_decoder = create_mlp(latent_dim, input_dim, [32]).to(dtype).to(device)
 
 simple_encoder_cpu = copy.deepcopy(simple_encoder).to(torch.device("cpu"))
 simple_decoder_cpu = copy.deepcopy(simple_decoder).to(torch.device("cpu"))
@@ -128,21 +135,26 @@ if __name__=='__main__':
     ### Reconstruction training for latent space ###
     ################################################
 
+    # training data
+    board_images = torch.utils.data.DataLoader(
+        [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
+        batch_size=len(boards),
+    )
+
     if args.reconstruction_training_epochs is not None:
+
+        print("Training encoder and decoder ...")
 
         # instantiate nets
         img_encoder_full = ConvEncoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
         img_decoder_full = ConvDecoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
         
+        print(img_encoder_full)
+        print(img_decoder_full)
+
         # instantiate optims
         img_encoder_full_optim = torch.optim.Adam(img_encoder_full.parameters(), lr=encoder_lr)
         img_decoder_full_optim = torch.optim.Adam(img_decoder_full.parameters(), lr=decoder_lr)
-
-        # training
-        board_images = torch.utils.data.DataLoader(
-            [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
-            batch_size=len(boards),
-        )
 
         # reconstruction_training_data = board_images
         # losses, img_encoder_full, img_decoder_full = reconstruction_training(
@@ -179,42 +191,10 @@ if __name__=='__main__':
             [img_decoder_full, simple_decoder],
             [img_decoder_full_optim],
             loss_fns=[F.mse_loss, ohe_loss_fn],
-            loss_weights=[1, 0.5],
+            loss_weights=[1, 0.2],
             noise_std=0.2,
             logger=run,
         )
-
-        tn = len(boards)
-        fig, axs = plt.subplots(2, tn, figsize=(2 * tn, 4))
-        for k in range(tn):
-            t_input = single_img_tensor_represent(boards[k])[0]
-            with torch.no_grad():
-                dec = img_decoder_full(img_encoder_full(t_input))
-            axs[0, k].imshow(np.asarray(t_input.squeeze(0).cpu()), cmap="gray")
-            axs[1, k].imshow(np.asarray(dec.squeeze(0).cpu()), cmap="gray")
-
-        a = np.zeros((tn, tn))
-        for i, j in itertools.product(range(tn), range(tn)):
-            g, t = [single_img_tensor_represent(k)[0] for k in [boards[i], boards[j]]]
-            g = img_decoder_full(img_encoder_full(g))
-            a[i, j] = F.mse_loss(g, t)
-
-        if log_path is not None: plt.savefig(log_path.joinpath("img/reconstruction.png"))
-        if run is not None: run.log({"reconstructions": wandb.Image(fig)})
-
-        fig, axs = plt.subplots(1, 3, figsize=(30, 8))
-        axs[0].set_title("Full")
-        sns.heatmap(a, ax=axs[0])
-        axs[1].set_title("< 0.010")
-        sns.heatmap(a < 0.020, ax=axs[1])
-        axs[2].set_title("< 0.005")
-        sns.heatmap(a < 0.010, ax=axs[2])
-        if log_path is not None: plt.savefig(log_path.joinpath("img/threshold_map.png"))
-        if run is not None: run.log({"latent_differences": wandb.Image(fig)})
-
-        fig = plot_embedding_tsne(img_encoder_full, list(board_images)[0], boards)
-        if log_path is not None: fig.savefig(log_path.joinpath("img/encoder_tsne.png"))        
-
 
         # save nets with pickle
         if args.save_latent:
@@ -223,12 +203,81 @@ if __name__=='__main__':
 
     else:
         # load enoder and decoder
-        img_encoder_full = pickle.load(open(data_path.joinpath(f"weights/img_encoder_full.pkl"), "rb"))
-        img_decoder_full = pickle.load(open(data_path.joinpath(f"weights/img_decoder_full.pkl"), "rb"))
+        img_encoder_full = pickle.load(open(data_path.joinpath(f"weights/img_encoder_full.pkl"), "rb")).to(device)
+        img_decoder_full = pickle.load(open(data_path.joinpath(f"weights/img_decoder_full.pkl"), "rb")).to(device)
 
     # get cpu versions of encoder and decoder
     img_encoder_full_cpu = copy.deepcopy(img_encoder_full).to(torch.device("cpu"))
     img_decoder_full_cpu = copy.deepcopy(img_decoder_full).to(torch.device("cpu"))
+
+
+    ##############################################
+    ### Plot reconstruction and threshold maps ###
+    ##############################################
+
+    if args.plot_latent:
+
+        print("Plotting reconstructions ...")
+        p_data = list(board_images)[0]
+        tn = len(p_data)
+        fig, axs = plt.subplots(2, tn, figsize=(2 * tn, 4))
+        with torch.no_grad():
+            t_decs = img_decoder_full(img_encoder_full(p_data))
+        t_inputs = [single_img_tensor_represent(b)[0] for b in boards]
+
+        for k in tqdm(range(tn)):
+            axs[0, k].imshow(np.asarray(t_inputs[k].squeeze(0).cpu()), cmap="gray")
+            axs[1, k].imshow(np.asarray(t_decs[k].squeeze(0).cpu()), cmap="gray")
+
+        print("Saving figure ...", end=' ', flush=True)
+        if log_path is not None: plt.savefig(log_path.joinpath("img/reconstruction.png"))
+        if run is not None: run.log({"reconstructions": wandb.Image(fig)})
+        print("Done")
+
+        print("Plotting t-SNE embeddings ...", end=' ', flush=True)
+        fig = plot_embedding_tsne(img_encoder_full, p_data, boards)
+        print("Done")
+
+        print("Saving figure ...", end=' ', flush=True)
+        if log_path is not None: fig.savefig(log_path.joinpath("img/encoder_tsne.png"))        
+        print("Done")
+
+        print("Computing threshold maps ...")
+        a = np.zeros((2, tn, tn))
+        for i, j in tqdm(list(itertools.product(range(tn), range(tn)))):
+            g, t = t_decs[i], t_inputs[j]
+            # a[0, i, j] = F.mse_loss(g, t)
+            a[1, i, j] = get_homography_distance(g, t)
+
+            if i == j:
+                print(boards[i], a[1, i, j])
+
+        print("Ploting threshold maps ...", end=' ', flush=True)
+        fig, axs = plt.subplots(2, 4, figsize=(40, 20))
+
+        axs[0, 0].set_title("Full")
+        sns.heatmap(a[0], ax=axs[0, 0])
+        axs[0, 1].set_title("< 0.010")
+        sns.heatmap(a[0] < 0.010, ax=axs[0, 1])
+        axs[0, 2].set_title("< 0.005")
+        sns.heatmap(a[0] < 0.005, ax=axs[0, 2])
+        axs[0, 3].set_title("< 0.002")
+        sns.heatmap(a[0] < 0.002, ax=axs[0, 3])
+
+        axs[1, 0].set_title("Full")
+        sns.heatmap(a[1], ax=axs[1, 0])
+        axs[1, 1].set_title("< 1000")
+        sns.heatmap(a[1] < 1000, ax=axs[1, 1])
+        axs[1, 2].set_title("< 100")
+        sns.heatmap(a[1] < 100, ax=axs[1, 2])
+        axs[1, 3].set_title("< 10")
+        sns.heatmap(a[1] < 10, ax=axs[1, 3])
+        print("Done")
+
+        print("Saving figure ...", end=' ', flush=True)
+        if log_path is not None: plt.savefig(log_path.joinpath("img/threshold_map.png"))
+        if run is not None: run.log({"latent_differences": wandb.Image(fig)})
+        print("Done")
 
 
     ##########################
@@ -237,6 +286,8 @@ if __name__=='__main__':
 
 
     if args.transform_training_epochs is not None:
+
+        print("Training transforms ...")
 
         img_transforms = {
             k: create_mlp(latent_dim, latent_dim, [32]).to(dtype).to(device)
@@ -332,7 +383,7 @@ if __name__=='__main__':
         for i in range(1, 20):
             t_progs = [random.choices(tf_names, k=i) + ["out"] for _ in range(t_n_progs)]
             eval_examples.append(
-                generate_examples_random(t_progs, boards, lib, args.eval_n)
+                generate_examples_random(t_progs, boards, lib, args.eval_latent_acc_n)
             )
 
         with torch.no_grad():
@@ -340,11 +391,11 @@ if __name__=='__main__':
                 list(itertools.chain(*eval_examples)),
                 img_encoder_full_cpu,
                 img_decoder_full_cpu,
-                one_hot_tensor_represent_cpu,
-                one_hot_tensor_represent_cpu,
+                single_img_tensor_represent_cpu,
+                single_img_tensor_represent_cpu,
                 img_transforms_cpu,
                 apply_nn_transform,
-                pruned_search_creator(single_object_ohe_hit_check, 21, args.timeout),
+                pruned_search_creator(single_object_img_mse_hit_check_creator, 21, args.timeout),
                 n_workers=args.num_cpu_search,
             )
         

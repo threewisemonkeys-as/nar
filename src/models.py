@@ -123,7 +123,8 @@ class ConvDecoder(nn.Module):
         num_c = pre_conv_dim
         dim = 1
 
-        while dim <= (min_dim // 2):
+        # while dim <= (min_dim // 2):
+        while num_c > 4:
             self._conv.append(nn.ConvTranspose2d(num_c, num_c // 2, 3, 2, 1, 1))
             if upsample:
                 self._conv.append(nn.Upsample(scale_factor=2))
@@ -133,13 +134,13 @@ class ConvDecoder(nn.Module):
             if upsample:
                 dim *= 2
         self._conv.append(nn.ConvTranspose2d(num_c, out_c, 3, 2, 1, 1))
-        dim *= 2
-        if dim == min_dim * 2:
-            self._conv.append(nn.Conv2d(out_c, out_c, 3, 2, 1))
-        elif dim == min_dim:
-            self._conv.append(nn.Conv2d(out_c, out_c, 3, 1, 1))
-        else:
-            raise Exception("Cant work")
+        # dim *= 2
+        # if dim == min_dim * 2:
+        #     self._conv.append(nn.Conv2d(out_c, out_c, 3, 2, 1))
+        # elif dim == min_dim:
+        #     self._conv.append(nn.Conv2d(out_c, out_c, 3, 1, 1))
+        # else:
+        #     raise Exception("Cant work")
         self._conv = nn.Sequential(*self._conv)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
