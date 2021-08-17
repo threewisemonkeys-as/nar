@@ -89,6 +89,7 @@ if args.num_seen_shapes == 0:
     shapes = ["unseen"]
 else:
     shapes = total_shapes[:args.num_seen_shapes]
+boards = generate_board_states(shapes, 1)
 
 (
     data_split,
@@ -175,7 +176,7 @@ if __name__=='__main__':
         if args.save_img_encoder:
             pickle.dump(copy.deepcopy(img_encoder).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder.pkl"), "wb"))
 
-        fig = plot_embedding_tsne(simple_encoder, list(xs)[0], boards)
+        fig = plot_embedding_tsne(img_encoder, list(xs)[0], boards)
         if log_path is not None: fig.savefig(log_path.joinpath("ohe_img_encoder/img_encoder_tsne.png"))        
 
     else:
@@ -328,7 +329,7 @@ if __name__=='__main__':
             pickle.dump(simple_transforms_cpu, open(data_path.joinpath("weights/ohe_img_encoder_transforms.pkl"), "wb"))
 
     else:
-        simple_transforms_path = data_path.joinpath("weights/ohe_img_encoder_transforms.pkl")
+        simple_transforms_path = data_path.joinpath("weights/simple_transforms.pkl")
         if simple_transforms_path.exists():
             simple_transforms = pickle.load(open(simple_transforms_path, "rb"))
             for t_tf in simple_transforms.values(): t_tf.to(device)
@@ -346,6 +347,9 @@ if __name__=='__main__':
 
 
     if args.eval_latent_acc_n is not None:
+
+        print("Evaluating on compositions of transforms of varying length ...")
+
         tf_names = list(lib.primitives_dict.keys())
         t_n_progs = 500
         eval_examples = []
@@ -360,7 +364,7 @@ if __name__=='__main__':
                 list(itertools.chain(*eval_examples)),
                 img_encoder_cpu,
                 simple_decoder_cpu,
-                single_img_tensor_represent,
+                single_img_tensor_represent_cpu,
                 one_hot_tensor_represent_cpu,
                 simple_transforms_cpu,
                 apply_nn_transform,
@@ -380,6 +384,10 @@ if __name__=='__main__':
             elif r["result"] == "max_depth":
                 r_dict["max_depth"][len(r["example"]["program"])] += 1
                 n_dict[len(r["example"]["program"])] += 1
+
+        print("Depth\tCount\tHits\tTimeout\tMax Depth")
+        for k, v in n_dict.items():
+            print(f"{k}\t{v}\t{r_dict['hits'][k]/v}\t{r_dict['timeout'][k]/v}\t{r_dict['max_depth'][k]/v}")
 
         fig = plt.figure()
         for k, v in r_dict.items():
@@ -403,6 +411,8 @@ if __name__=='__main__':
 
     if args.eval_n is not None:
 
+        print("Evaluating performance with search on dataset ...")
+
         eval_examples = []
         for i in range(20):
             eval_examples.append(
@@ -414,7 +424,7 @@ if __name__=='__main__':
                 list(itertools.chain(*eval_examples)),
                 img_encoder_cpu,
                 simple_decoder_cpu,
-                single_img_tensor_represent,
+                single_img_tensor_represent_cpu,
                 one_hot_tensor_represent_cpu,
                 simple_transforms_cpu,
                 apply_nn_transform,
@@ -433,6 +443,7 @@ if __name__=='__main__':
 
 
     if args.search_n is not None:
+
         t_prog = ["out", "shiftright", "to-circle", "out",  "to-triangle", "shiftright", "out", "shiftdown", "to-square", "out", "shiftleft", "out"]
         t_board = {("triangle", (0, 0))}
         t_ex = generate_examples_exhaustive([t_prog], [t_board], lib)
@@ -447,7 +458,7 @@ if __name__=='__main__':
                 t_search = exhaustive_search_creator(ohe_hit_check, i)
                 r, s, time_taken = t_search(
                     t_ex,
-                    single_img_tensor_represent,
+                    single_img_tensor_represent_cpu,
                     one_hot_tensor_represent_cpu,
                     img_encoder_cpu,
                     simple_decoder_cpu,
@@ -479,7 +490,7 @@ if __name__=='__main__':
                         t_search,
                         args=(
                             [t_ex],
-                            single_img_tensor_represent,
+                            single_img_tensor_represent_cpu,
                             one_hot_tensor_represent_cpu,
                             img_encoder_cpu,
                             simple_decoder_cpu,

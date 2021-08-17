@@ -253,6 +253,7 @@ if __name__=='__main__':
     ### Evaluation of accuracy of latent space ###
     ##############################################
 
+    print("Evaluating on compositions of transforms of varying length ...")
 
     if args.eval_latent_acc_n is not None:
         tf_names = list(lib.primitives_dict.keys())
@@ -290,6 +291,10 @@ if __name__=='__main__':
                 r_dict["max_depth"][len(r["example"]["program"])] += 1
                 n_dict[len(r["example"]["program"])] += 1
 
+        print("Depth\tCount\tHits\tTimeout\tMax Depth")
+        for k, v in n_dict.items():
+            print(f"{k}\t{v}\t{r_dict['hits'][k]/v}\t{r_dict['timeout'][k]/v}\t{r_dict['max_depth'][k]/v}")
+
         fig = plt.figure()
         for k, v in r_dict.items():
             t_dict = {}
@@ -311,6 +316,8 @@ if __name__=='__main__':
 
 
     if args.eval_n is not None:
+
+        print("Evaluating performance with search on dataset ...")
 
         eval_examples = []
         for i in range(20):
