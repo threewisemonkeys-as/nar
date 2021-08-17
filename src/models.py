@@ -2,7 +2,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from matplotlib.pyplot import draw
+import torch.nn.functional as F
 
 
 def create_mlp(
@@ -134,13 +134,13 @@ class ConvDecoder(nn.Module):
             if upsample:
                 dim *= 2
         self._conv.append(nn.ConvTranspose2d(num_c, out_c, 3, 2, 1, 1))
-        # dim *= 2
-        # if dim == min_dim * 2:
-        #     self._conv.append(nn.Conv2d(out_c, out_c, 3, 2, 1))
-        # elif dim == min_dim:
-        #     self._conv.append(nn.Conv2d(out_c, out_c, 3, 1, 1))
-        # else:
-        #     raise Exception("Cant work")
+        dim *= 2
+        if dim == min_dim * 2:
+            self._conv.append(nn.Conv2d(out_c, out_c, 3, 2, 1))
+        elif dim == min_dim:
+            self._conv.append(nn.Conv2d(out_c, out_c, 3, 1, 1))
+        else:
+            raise Exception("Cant work")
         self._conv = nn.Sequential(*self._conv)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -150,7 +150,7 @@ class ConvDecoder(nn.Module):
         Returns:
             torch.Tensor: embedding vector
         """
-        x = self._linear(x)
+        x = F.relu(self._linear(x))
         x = x.view(*x.shape[:-1], -1, 1, 1)
         x = self._conv(x)
         x = x.squeeze(-3) if self._2d_output else x

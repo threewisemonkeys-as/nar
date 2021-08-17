@@ -20,21 +20,25 @@ import seaborn as sns
 from src.datagen import (
     generate_board_states,
     generate_examples_random,
-    generate_examples_exhaustive
+    generate_examples_exhaustive,
+    generate_random_image_data
 )
 from src.models import apply_nn_transform, create_mlp, ConvEncoder, ConvDecoder
 from src.ohe import ohe_fns_creator
 from src.search import exhaustive_search_creator, pruned_search_creator, search_test
-from src.training import train_transform, multi_reconstruction_training, reconstruction_training
-from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE, single_object_img_mse_hit_check_creator, get_homography_distance, single_object_img_homography_hit_check_creator
-from src.utils import plot_embedding_tsne
+from src.training import train_transform, multi_reconstruction_training, reconstruction_training, target_training
+from src.image import img_represent_fns_creator, load_shape_map, IMG_SIZE, single_object_img_mse_hit_check_creator, get_homography_distance, single_object_img_homography_hit_check_creator, load_img_tensor, draw_tensor_board
+from src.utils import plot_embedding_tsne, apply_transform_program
 
 parser = argparse.ArgumentParser(description='Script to evaluate system with latent space based on image represetation')
 parser.add_argument("--transform_training_epochs", type=int, default=None, help="Perform transform training for this many epochs. Default behaviour is to load trained from data/")
 parser.add_argument("--save_transforms", action="store_true", help="Whether to save transforms. (--log_path and --transform_training_epochs must be specified)")
 parser.add_argument("--reconstruction_training_epochs", type=int, default=None, help="Perform reconstruction training to train one-hot based encoder decoder for this many epochs. Default behaviour is to load trained from data/")
+parser.add_argument("--reconstruction2_training_epochs", type=int, default=None, help="Perform reconstruction training to train one-hot based encoder decoder for this many epochs with config2. Default behaviour is to load trained from data/")
+parser.add_argument("--random_images_reconstruction_training_epochs", type=int, default=None, help="Perform reconstruction training to train one-hot based encoder decoder for this many epochs with config2. Default behaviour is to load trained from data/")
 parser.add_argument("--save_latent", action="store_true", help="Whether to save encoder and decoder. (--log_path and --reconstruction_training_epochs must be specified)")
 parser.add_argument("--plot_latent", action="store_true", help="Whether to plot reconstruction and threshold maps")
+parser.add_argument("--plot_transforms", action="store_true", help="Whether to plot reconstruction and threshold maps")
 parser.add_argument("--eval_n", type=int, default=None, help="Evaluate system on search with this many examples per level upto 20")
 parser.add_argument("--eval_latent_acc_n", type=int, default=None, help="Evaluate accuracy of transforms with thismany examples per level upto 20")
 parser.add_argument("--search_n", type=int, default=None, help="Evaluate search performance with thismany examples per level upto 20")
@@ -118,14 +122,20 @@ _, single_img_tensor_represent_cpu = img_represent_fns_creator(
     shape_map, torch.device("cpu"), dtype
 )
 
-# simple_encoder = pickle.load(open(data_path.joinpath("weights/simple_encoder.pkl"), "rb")).to(device)
-# simple_decoder = pickle.load(open(data_path.joinpath("weights/simple_decoder.pkl"), "rb")).to(device)
-
 simple_encoder = create_mlp(input_dim, latent_dim, [32]).to(dtype).to(device)
 simple_decoder = create_mlp(latent_dim, input_dim, [32]).to(dtype).to(device)
 
+simple_encoder_optim = torch.optim.Adam(simple_encoder.parameters(), lr=encoder_lr)
+simple_decoder_optim = torch.optim.Adam(simple_decoder.parameters(), lr=encoder_lr)
+
 simple_encoder_cpu = copy.deepcopy(simple_encoder).to(torch.device("cpu"))
 simple_decoder_cpu = copy.deepcopy(simple_decoder).to(torch.device("cpu"))
+
+img_encoder_full = ConvEncoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
+img_decoder_full = ConvDecoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
+
+img_encoder_full_optim = torch.optim.Adam(img_encoder_full.parameters(), lr=encoder_lr)
+img_decoder_full_optim = torch.optim.Adam(img_decoder_full.parameters(), lr=decoder_lr)
 
 if __name__=='__main__':
 
@@ -141,33 +151,9 @@ if __name__=='__main__':
         batch_size=len(boards),
     )
 
-    if args.reconstruction_training_epochs is not None:
+    if args.reconstruction_training_epochs is not None and args.reconstruction_training_epochs > 0:
 
         print("Training encoder and decoder ...")
-
-        # instantiate nets
-        img_encoder_full = ConvEncoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
-        img_decoder_full = ConvDecoder(IMG_SIZE, latent_dim, True).to(device).to(dtype)
-        
-        print(img_encoder_full)
-        print(img_decoder_full)
-
-        # instantiate optims
-        img_encoder_full_optim = torch.optim.Adam(img_encoder_full.parameters(), lr=encoder_lr)
-        img_decoder_full_optim = torch.optim.Adam(img_decoder_full.parameters(), lr=decoder_lr)
-
-        # reconstruction_training_data = board_images
-        # losses, img_encoder_full, img_decoder_full = reconstruction_training(
-        #     reconstruction_training_data,
-        #     args.reconstruction_training_epochs,
-        #     img_encoder_full,
-        #     img_encoder_full_optim,
-        #     img_decoder_full,
-        #     img_decoder_full_optim,
-        #     loss_fn=F.mse_loss,
-        #     noise_std=2.0,
-        #     logger=run,
-        # )
 
         reconstruction_training_data = torch.utils.data.DataLoader(
             [   
@@ -183,7 +169,7 @@ if __name__=='__main__':
             batch_size=len(boards)
         )
 
-        losses, img_encoder_full, (img_decoder_full, _) = multi_reconstruction_training(
+        losses, img_encoder_full, (img_decoder_full,) = multi_reconstruction_training(
             reconstruction_training_data,
             args.reconstruction_training_epochs,
             img_encoder_full,
@@ -191,7 +177,7 @@ if __name__=='__main__':
             [img_decoder_full, simple_decoder],
             [img_decoder_full_optim],
             loss_fns=[F.mse_loss, ohe_loss_fn],
-            loss_weights=[1, 0.2],
+            loss_weights=[1, 0.5],
             noise_std=0.2,
             logger=run,
         )
@@ -201,10 +187,116 @@ if __name__=='__main__':
             pickle.dump(copy.deepcopy(img_encoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder_full.pkl"), "wb"))
             pickle.dump(copy.deepcopy(img_decoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_decoder_full.pkl"), "wb"))
 
-    else:
+    elif args.reconstruction_training_epochs is not None and args.reconstruction_training_epochs == 0:
         # load enoder and decoder
         img_encoder_full = pickle.load(open(data_path.joinpath(f"weights/img_encoder_full.pkl"), "rb")).to(device)
         img_decoder_full = pickle.load(open(data_path.joinpath(f"weights/img_decoder_full.pkl"), "rb")).to(device)
+
+    # config 2
+
+    elif args.reconstruction2_training_epochs is not None and args.reconstruction2_training_epochs > 0:
+
+        print("Training encoder and decoder (config2) ...")
+
+        reconstruction_training_data = torch.utils.data.DataLoader(
+            [   
+                (
+                    one_hot_tensor_represent(i)[0].squeeze(0),
+                    (
+                        single_img_tensor_represent(i)[0].squeeze(0),
+                        one_hot_tensor_represent(i)[0].squeeze(0)
+                    )         
+                )
+                for i in boards
+            ],
+            batch_size=len(boards)
+        )
+
+        losses, simple_encoder, (img_decoder_full, simple_decoder) = multi_reconstruction_training(
+            reconstruction_training_data,
+            args.reconstruction2_training_epochs,
+            simple_encoder,
+            simple_encoder_optim,
+            [img_decoder_full, simple_decoder],
+            [img_decoder_full_optim, simple_decoder_optim],
+            loss_fns=[F.mse_loss, ohe_loss_fn],
+            loss_weights=[1, 0.5],
+            noise_std=0.2,
+            logger=run,
+        )
+
+        # training 
+        xs = torch.utils.data.DataLoader(
+            [single_img_tensor_represent(b)[0].squeeze(0) for b in boards],
+            batch_size=len(boards),
+        )
+        with torch.no_grad():
+            ys = torch.utils.data.DataLoader(
+                [
+                    simple_encoder(one_hot_tensor_with_unseen_represent(b)[0].squeeze(0))
+                    for b in boards
+                ],
+                batch_size=len(boards),
+            )
+
+        losses, img_encoder_full = target_training(
+            xs,
+            ys,
+            args.reconstruction2_training_epochs,
+            img_encoder_full,
+            img_encoder_full_optim,
+            F.mse_loss,
+            0.0,
+        )
+
+        # save nets with pickle
+        if args.save_latent:
+            pickle.dump(copy.deepcopy(img_encoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder2_full.pkl"), "wb"))
+            pickle.dump(copy.deepcopy(img_decoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_decoder2_full.pkl"), "wb"))
+
+    elif args.reconstruction2_training_epochs is not None and args.reconstruction2_training_epochs == 0:
+        # load enoder and decoder
+        img_encoder_full = pickle.load(open(data_path.joinpath(f"weights/img_encoder2_full.pkl"), "rb")).to(device)
+        img_decoder_full = pickle.load(open(data_path.joinpath(f"weights/img_decoder2_full.pkl"), "rb")).to(device)
+
+
+    # config 3
+
+    elif args.random_images_reconstruction_training_epochs is not None and args.random_images_reconstruction_training_epochs > 0:
+
+        print("Training encoder and decoder with randomly generated images  (config 3) ...")
+
+        random_images = generate_random_image_data(4096, shape_map)
+        reconstruction_training_data = torch.utils.data.DataLoader(
+
+            batch_size=1024,
+        )
+
+        losses, img_encoder_full, (img_decoder_full,) = multi_reconstruction_training(
+            reconstruction_training_data,
+            args.reconstruction_training_epochs,
+            img_encoder_full,
+            img_encoder_full_optim,
+            [img_decoder_full],
+            [img_decoder_full_optim],
+            loss_fns=[F.mse_loss],
+            loss_weights=[1],
+            noise_std=0.2,
+            logger=run,
+        )
+
+        # save nets with pickle
+        if args.save_latent:
+            pickle.dump(copy.deepcopy(img_encoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_encoder3_full.pkl"), "wb"))
+            pickle.dump(copy.deepcopy(img_decoder_full).to(torch.device("cpu")), open(data_path.joinpath(f"weights/img_decoder3_full.pkl"), "wb"))
+
+    elif args.random_images_reconstruction_training_epochs is not None and args.random_images_reconstruction_training_epochs == 0:
+        # load enoder and decoder
+        img_encoder_full = pickle.load(open(data_path.joinpath(f"weights/img_encoder3_full.pkl"), "rb")).to(device)
+        img_decoder_full = pickle.load(open(data_path.joinpath(f"weights/img_decoder3_full.pkl"), "rb")).to(device)
+
+    else:
+        raise ValueError("Must specify args.reconstruction_training_epochs or args.reconstruction2_training_epochs or args.random_images_reconstruction_training_epochs")
 
     # get cpu versions of encoder and decoder
     img_encoder_full_cpu = copy.deepcopy(img_encoder_full).to(torch.device("cpu"))
@@ -245,12 +337,9 @@ if __name__=='__main__':
         print("Computing threshold maps ...")
         a = np.zeros((2, tn, tn))
         for i, j in tqdm(list(itertools.product(range(tn), range(tn)))):
-            g, t = t_decs[i], t_inputs[j]
-            # a[0, i, j] = F.mse_loss(g, t)
+            g, t = t_decs[i], t_inputs[j].squeeze(0)
+            a[0, i, j] = F.mse_loss(g, t)
             a[1, i, j] = get_homography_distance(g, t)
-
-            if i == j:
-                print(boards[i], a[1, i, j])
 
         print("Ploting threshold maps ...", end=' ', flush=True)
         fig, axs = plt.subplots(2, 4, figsize=(40, 20))
@@ -261,8 +350,8 @@ if __name__=='__main__':
         sns.heatmap(a[0] < 0.010, ax=axs[0, 1])
         axs[0, 2].set_title("< 0.005")
         sns.heatmap(a[0] < 0.005, ax=axs[0, 2])
-        axs[0, 3].set_title("< 0.002")
-        sns.heatmap(a[0] < 0.002, ax=axs[0, 3])
+        axs[0, 3].set_title("< 0.003")
+        sns.heatmap(a[0] < 0.003, ax=axs[0, 3])
 
         axs[1, 0].set_title("Full")
         sns.heatmap(a[1], ax=axs[1, 0])
@@ -290,7 +379,7 @@ if __name__=='__main__':
         print("Training transforms ...")
 
         img_transforms = {
-            k: create_mlp(latent_dim, latent_dim, [32]).to(dtype).to(device)
+            k: create_mlp(latent_dim, latent_dim, [64, 64]).to(dtype).to(device)
             for k in lib.primitives_dict.keys()
         }
         img_tf_optims = {
@@ -332,7 +421,7 @@ if __name__=='__main__':
                     img_transforms[tf],
                     img_tf_optims[tf],
                     F.mse_loss,
-                    2.0,
+                    0.1,
                 )
             )
             t_results[tf] = r
@@ -352,6 +441,15 @@ if __name__=='__main__':
             for i, l in enumerate(losses):
                 run.log({"loss/tf_mean": l, "epoch": i})
 
+
+        print("Plotting transforms ...", end=' ', flush=True)
+        tp = [["out"], ['shiftright', 'out'], ["shiftright", "shiftup", "out"]]
+        bp = {("triangle", (1, 1))}
+        draw_tensor_board(apply_transform_program(tp[0], bp, img_encoder_full, img_decoder_full, single_img_tensor_represent, img_transforms, apply_nn_transform)).savefig("t0.png")
+        draw_tensor_board(apply_transform_program(tp[1], bp, img_encoder_full, img_decoder_full, single_img_tensor_represent, img_transforms, apply_nn_transform)).savefig("t1.png")
+        draw_tensor_board(apply_transform_program(tp[2], bp, img_encoder_full, img_decoder_full, single_img_tensor_represent, img_transforms, apply_nn_transform)).savefig("t2.png")
+        print("Done")
+
         # save nets using pickle
         if args.save_transforms:
             img_transforms_cpu = {k: copy.deepcopy(v).to(torch.device("cpu")) for k, v in img_transforms.items()}
@@ -369,6 +467,34 @@ if __name__=='__main__':
             sys.exit(1)
 
     img_transforms_cpu = {k: copy.deepcopy(v).to(torch.device("cpu")) for k, v in img_transforms.items()}
+
+
+    ##########################
+    ### Plotting transform ###
+    ##########################
+
+    if args.plot_transforms and args.log_path is not None:
+
+        print("Plotting transforms ...", end=' ', flush=True)
+        tp = [["out"], ['shiftright', 'out'], ["shiftright", "shiftup", "out"]]
+        bp = {("triangle", (1, 1))}
+        fig, axs = plt.subplots(1, 3)
+        for t_idx, t_tp in enumerate(tp):
+            draw_tensor_board(
+                apply_transform_program(
+                    t_tp,
+                    bp, 
+                    img_encoder_full, 
+                    img_decoder_full, 
+                    single_img_tensor_represent, 
+                    img_transforms, 
+                    apply_nn_transform
+                ),
+                axs[t_idx],
+                )
+            axs[t_idx].set_title(f"{', '.join(t_tp[:-1])}")
+        plt.savefig(log_path.joinpath("img/transform_example.png"))
+        print("Done")
 
 
     ##############################################
@@ -537,7 +663,6 @@ if __name__=='__main__':
         print("Depth\tFound\tTime")
         for i in range(len(x)):
             print(f"{x[i]}\t{y[i]}")
-        
 
         fig = plt.figure()
         plt.plot(x, y, label='Pruned Emperical')

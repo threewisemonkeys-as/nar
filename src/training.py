@@ -201,14 +201,14 @@ def train_transform(
 
         for x, y in data:
 
-            if noise_std != 0.0:
-                x += torch.randn_like(x) * (noise_std / 10)
+            # if noise_std != 0.0:
+                # x += torch.randn_like(x) * (noise_std / 10)
             x = encoder(x)
             if noise_std != 0.0:
                 x += torch.randn_like(x) * noise_std
             x = transform(x)
-            if noise_std != 0.0:
-                x += torch.randn_like(x) * noise_std
+            # if noise_std != 0.0:
+                # x += torch.randn_like(x) * noise_std
             x = decoder(x)
 
             loss = loss_fn(x, y)

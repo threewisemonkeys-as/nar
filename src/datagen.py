@@ -4,7 +4,7 @@ import itertools
 import random
 from typing import List
 
-from .image import IMG_SIZE, SHAPE_IMG_SIZE, load_shape_map
+from .image import IMG_SIZE, SHAPE_IMG_SIZE
 
 from tqdm import tqdm
 from PIL import Image
@@ -189,14 +189,14 @@ def generate_random_image_data(n: int, shape_map: dict):
     
     random_shapes = random.choices(list(shape_map.keys()), k=n)
     
-    limit = IMG_SIZE - SHAPE_IMG_SIZE
-    random_positions = [(random.random() * limit, random.random() * limit) for _ in range(n)]
+    limit = (IMG_SIZE[0] - SHAPE_IMG_SIZE[0], IMG_SIZE[1] - SHAPE_IMG_SIZE[1])
+    random_positions = [(int(random.random() * limit[0]), int(random.random() * limit[1])) for _ in range(n)]
 
     images = []    
     for shape, pos in zip(random_shapes, random_positions):
         bg = Image.new("RGB", IMG_SIZE, (255, 255, 255))
         bg.paste(shape_map[shape], box=pos)
-        images.append(bg)
+        images.append((bg, (shape, pos)))
     
     return images
 
@@ -228,7 +228,3 @@ if __name__ == "__main__":
     for n in range(1, 21):
         shift_programs_upto_20.append(generate_programs_random(shift_lib, n, 1000))
     pickle.dump(shift_programs_upto_20, open("data/programs/shift_programs_upto_20.pkl", "wb"))
-
-    shape_map = load_shape_map("data/images")
-    random_images = generate_random_image_data(1, shape_map)
-    random_images[0].save("random_image.png")

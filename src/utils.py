@@ -92,7 +92,7 @@ def get_unique(items):
 
 def plot_embedding_tsne(encoder, inputs, boards):
         tsne = TSNE(2)
-        zs = encoder(inputs).detach().cpu().numpy()
+        zs = encoder(inputs).flatten(start_dim=1).detach().cpu().numpy()
         zs_tsne = tsne.fit_transform(zs)
         fig, axs = plt.subplots(1, 2, figsize=(15, 10))
         shapes = get_unique([list(b)[0][0] for b in boards])
