@@ -41,6 +41,8 @@ parser.add_argument("--log_path", type=str, default=None, help="Path to store lo
 parser.add_argument("--data_path", type=str, default="data/", help="Path where library, model weights etc.. are stored")
 parser.add_argument("--seed", type=int, default=42, help="Seed for random number generators")
 parser.add_argument("--timeout", type=int, default=120, help="Timeout for search in seconds")
+parser.add_argument("--include_unseen_slot", action="store_true", help="Whether to include a slot in the one-hot for unseen shapes")
+parser.add_argument("--num_seen_shapes", type=int, default=20, choices=range(0, 21), help="Number of shapes present in one-hot (apart from unseen)")
 parser.add_argument("--gpu_id", type=int, default=0, help="Which gpu to use")
 parser.add_argument("--num_cpu_training", type=int, default=8, help="Max number of cpu to use for parallelism for training.")
 parser.add_argument("--num_cpu_search", type=int, default=16, help="Max number of cpu to use for parallelism for search")
@@ -77,7 +79,13 @@ shift_lib = dill.load(open(data_path.joinpath("libraries/shift_library0.pkl"), "
 programs_upto_20 = pickle.load(open(data_path.joinpath("programs/programs_upto_20.pkl"), "rb"))
 shift_programs_upto_6 = pickle.load(open(data_path.joinpath("programs/shift_programs_upto_6.pkl"), "rb"))
 
-shapes = ["circle", "square", "triangle", "delta", "b", "d", "e", "g", "k", "m", "r", "s", "u", "w", "x", "z", "theta", "pi", "tau", "psi"]
+total_shapes = ["circle", "square", "triangle", "delta", "b", "d", "e", "g", "k", "m", "r", "s", "u", "w", "x", "z", "theta", "pi", "tau", "psi"]
+if args.include_unseen_slot: total_shapes = ["unseen"] + total_shapes
+if args.num_seen_shapes == 0:
+    shapes = ["unseen"]
+else:
+    shapes = total_shapes[:args.num_seen_shapes]
+
 boards = generate_board_states(shapes, 1)
 
 (

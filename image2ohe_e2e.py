@@ -4,7 +4,6 @@ import pickle
 
 import yaml
 import torch
-from PIL import Image
 import numpy as np
 import wandb
 
@@ -22,10 +21,13 @@ parser.add_argument("--decoder", type=str, default=None, help="Path of the decod
 parser.add_argument("--transforms", type=str, default=None, help="Path of the transform model")
 parser.add_argument("--data_path", type=str, default="data/", help="Path where library, images etc.. are stored")
 parser.add_argument("--log_path", type=str, default="results/", help="Path to store logs")
+parser.add_argument("--output_path", type=str, default="e2e_output.png", help="Path to store output")
 parser.add_argument("--seed", type=int, default=42, help="Seed for random number generators")
 parser.add_argument("--timeout", type=int, default=60, help="Timeout for search in seconds")
 parser.add_argument("--max_depth", type=int, default=21, help="Timeout for search in seconds")
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument("--shape_slots", type=int, default=1, help="Number of shapes slots present in one-hot (including unseen)")
+
 args = parser.parse_args()
 
 
@@ -58,6 +60,8 @@ encoder.eval()
 decoder.eval()
 for tf in transforms.values(): tf.eval()
 
+num_shapes = args.shape_slots
+
 (
     data_split,
     one_hot_mapping,
@@ -68,7 +72,7 @@ for tf in transforms.values(): tf.eval()
     ohe_partial_hit_check,
     ohe_loss_fn_creator,
     one_hot_tensor_represent_creator,
-) = ohe_fns_creator(["unseen"], 3)
+) = ohe_fns_creator(list(range(num_shapes)), 3)
 
 search_fn = pruned_search_raw_creator(single_object_ohe_hit_check, args.max_depth, args.timeout)
 
@@ -160,4 +164,4 @@ f = apply_transform_program_raw(
 )
 
 out = visualise_example_with_unseen(list(enumerate(split_image(task["query"]))), f, ohe_decode)
-out.show()
+out.save(args.output_path)
