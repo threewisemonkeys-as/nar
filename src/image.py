@@ -77,9 +77,9 @@ def draw_simple_shape(shape):
 
 POS_GRID = np.array(
     [
-        [(2, 2), (22, 2), (42, 2)],
-        [(2, 22), (22, 22), (42, 22)],
-        [(2, 42), (22, 42), (42, 42)],
+        [(2, 2), (2, 22), (2, 42)],
+        [(22, 2), (22, 22), (22, 42)],
+        [(42, 2), (42, 22), (42, 42)],
     ]
 )
 IMG_SIZE = (64, 64)
@@ -93,10 +93,10 @@ def draw_board(board, shape_map: dict):
     return bg
 
 
-def draw_tensor_board(tensor_board):
+def draw_tensor_board(tensor_board, fig=plt.gca()):
     s = np.asarray(sum(tensor_board).squeeze(0).detach().cpu())
-    plt.figure()
-    plt.imshow(s, cmap="gray")
+    fig.imshow(s, cmap="gray")
+    return fig
 
 
 def draw_examples(examples):
@@ -224,6 +224,7 @@ def extract_shape_from_image(im: Image.Image) -> Image.Image:
     """Extract crop of input image whih containsthe shape"""
     grid_shape = POS_GRID.shape
     min_v = 255
+    shape_crop = None
     for i in range(grid_shape[0]):
         for j in range(grid_shape[1]):
             pos = POS_GRID[i, j]
@@ -245,6 +246,8 @@ def extract_shape_from_image(im: Image.Image) -> Image.Image:
 def homography_image_match_creator(thresh: float):
     def homography_image_match(im1: Image.Image, im2: Image.Image) -> bool:
         im1, im2 = (extract_shape_from_image(i) for i in (im1, im2))
+        if im1 is None or im2 is None:
+            return False
         h = homography(im1, im2)
         v = np.linalg.norm(h - np.eye(*h.shape))
         return v < thresh
@@ -291,24 +294,24 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float
 
-    # for shape in ["square", "square", "triangle", "circle", "delta"]:
-    #     shape_img = draw_simple_shape(shape)
-    #     shape_img.save(f"data/images/{shape}.png")
+    for shape in ["square", "square", "triangle", "circle", "delta"]:
+        shape_img = draw_simple_shape(shape)
+        shape_img.save(f"data/images/{shape}.png")
 
     shape_map = load_shape_map("data/images")
 
-    # board = [("triangle", (0, 0)), ("circle", (1, 1)), ("x", (2, 2))]
-    # draw_board(board, shape_map).show()
+    board = [("triangle", (0, 0)), ("circle", (1, 1)), ("x", (2, 2))]
+    draw_board(board, shape_map).show()
 
     single_img_represent, single_img_tensor_represent = img_represent_fns_creator(
         shape_map, device, dtype
     )
 
-    # board_img_tensors = single_img_tensor_represent(board)
-    # fig, axs = plt.subplots(1, 3)
-    # for n in range(len(board)):
-    #     axs[n].imshow(np.asarray(board_img_tensors[n].squeeze(0).cpu()), cmap="gray")
-    # plt.show()
+    board_img_tensors = single_img_tensor_represent(board)
+    fig, axs = plt.subplots(1, 3)
+    for n in range(len(board)):
+        axs[n].imshow(np.asarray(board_img_tensors[n].squeeze(0).cpu()), cmap="gray")
+    plt.show()
 
     board1 = single_img_tensor_represent([("triangle", (0, 0))])
     board2 = single_img_tensor_represent([("circle", (1, 0))])
