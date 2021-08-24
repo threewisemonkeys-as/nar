@@ -25,7 +25,11 @@ Neural Algorithms for Analogical Reasoning
 
 Each of the following scripts can be instructed to perform tasks through the appropriate command line arguments. Use the `-h` flags for script specific details.
 
+It is recommended to run the scripts in the given order if planning to train all models from scratch - 
+
 - `eval_ohe.py` is a script for training of latent space and transforms based on one-hot representation, followed by evaluation of accuracies and testing of search performance. `eval_ohe_old.py` is an older version which does not make use of parallelism.
+
+- `eval_ohe_img_encoder.py` is a script for training an image encoder to target a prexisting latent space based on one-hot representation as well as transform training and evaluation similar to `eval_ohe.py`. (Note that transfrom training can effectively be skipped and `simple_transforms.pkl` used since the latent space is nearly the same).
 
 - `eval_ohe_transforms_unseen.py` performs experiments on generalization of transforms to unseen shapes/positions in the one hot representation setting. It loads weights for a pretrained encoder and decoder and trains transforms with varying number of shapes/positions present in the training data and plots the results.
 
