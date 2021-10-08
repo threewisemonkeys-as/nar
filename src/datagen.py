@@ -1,13 +1,22 @@
 import collections
 import copy
 import itertools
+from itertools import product
 import random
 from typing import List
 
-from .image import IMG_SIZE, SHAPE_IMG_SIZE
+import sys
+if '/opt/ros/kinetic/lib/python2.7/dist-packages' in sys.path:
+    sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages')
 
+from image import IMG_SIZE, SHAPE_IMG_SIZE,load_shape_map
 from tqdm import tqdm
 from PIL import Image
+from sklearn.model_selection import train_test_split
+
+
+
+
 
 BOARD_SIZE = 3
 
@@ -149,7 +158,7 @@ def generate_programs_random_upto(
 
 def generate_examples_exhaustive(programs: List, boards: List, lib) -> List:
     """Generates examples consisting of input/output pairs obstained
-    by applying a set of given programs to all possible shape
+    by applying a set of given programs to all possible shape_map
     configurations of a given number of shapes on the board
     """
     data = []
@@ -200,31 +209,27 @@ def generate_random_image_data(n: int, shape_map: dict):
     
     return images
 
+def get_seen_unseen_split(shape_map: dict,test_size=0.2):
+    shapes=list(shape_map.keys())
+    seen_shapes,unseen_shapes=train_test_split(shapes,test_size=test_size)
+    limit = (IMG_SIZE[0] - SHAPE_IMG_SIZE[0], IMG_SIZE[1] - SHAPE_IMG_SIZE[1])
+    positions=[(a,b) for a in range(limit[0]) for b in range(limit[1])]
+    seen_pos,unseen_pos=train_test_split(positions,test_size=test_size)
+    return seen_shapes,unseen_shapes,seen_pos,unseen_pos
+
+def get_image_data(shapes,positions,shape_map):
+    images = []    
+    for shape, pos in product(shapes, positions):
+        bg = Image.new("RGB", IMG_SIZE, (255, 255, 255))
+        bg.paste(shape_map[shape], box=pos)
+        images.append((bg, (shape, pos)))
+    
+    return images
+
 
 if __name__ == "__main__":
-    import pickle
-
-    import dill
-
-    random.seed(42)
-
-    lib = dill.load(open("data/libraries/library0.pkl", "rb"))
-    shift_lib = dill.load(open("data/libraries/shift_library0.pkl", "rb"))
-    shapes = ["square", "triangle", "circle", "delta"]
-
-    shift_programs_upto_6 = []
-    for n in range(1, 7):
-        shift_programs_upto_6.append(generate_programs_exhaustive_upto(shift_lib, n))
-    pickle.dump(
-        shift_programs_upto_6, open("data/programs/shift_programs_upto_6.pkl", "wb")
-    )
-
-    programs_upto_20 = []
-    for n in range(1, 21):
-        programs_upto_20.append(generate_programs_random(lib, n, 1000))
-    pickle.dump(programs_upto_20, open("data/programs/programs_upto_20.pkl", "wb"))
-
-    shift_programs_upto_20 = []
-    for n in range(1, 21):
-        shift_programs_upto_20.append(generate_programs_random(shift_lib, n, 1000))
-    pickle.dump(shift_programs_upto_20, open("data/programs/shift_programs_upto_20.pkl", "wb"))
+    shape_map = load_shape_map("../data/images")
+    seen_shapes,unseen_shapes,seen_pos,unseen_pos=get_seen_unseen_split(shape_map)
+    images=get_image_data(seen_shapes,unseen_pos,shape_map)
+    print(len(images))
+    images[0][0].show()
