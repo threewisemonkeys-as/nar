@@ -130,7 +130,6 @@ def split_image(img: Image.Image) -> List[Image.Image]:
 
     return output
 
-
 def load_shape_map(save_dir: str) -> dict:
     """Loads PIL images into a dictionary with shapes as keys"""
     save_dir = pathlib.Path(save_dir)
