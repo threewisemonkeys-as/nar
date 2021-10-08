@@ -9,7 +9,7 @@ import sys
 if '/opt/ros/kinetic/lib/python2.7/dist-packages' in sys.path:
     sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages')
 
-from image import IMG_SIZE, SHAPE_IMG_SIZE,load_shape_map
+from .image import IMG_SIZE, SHAPE_IMG_SIZE,load_shape_map
 from tqdm import tqdm
 from PIL import Image
 from sklearn.model_selection import train_test_split
