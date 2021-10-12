@@ -69,7 +69,7 @@ def shift_creator(board_size=3):
 import re
 def flip(x):
     items = re.findall(r'[0-9]+|[a-z]+', x[0])
-    angle=360-int(items[0])
+    angle=(360-int(items[0]))%360
     return (str(angle)+items[1],x[1])
 
 if __name__ == "__main__":
