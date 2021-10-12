@@ -45,9 +45,10 @@ class Library:
         return "\n".join([name for name in self.primitives_dict])
 
 
-def to_shape_creator(shape_name):
+def to_shape_creator(shape_name,prefix=""):
     """Creates a Primitive to convert to a shape"""
-    return Primitive(f"to-{shape_name}", lambda x: (shape_name, x[1]))
+    new_shape_name=str(prefix)+shape_name
+    return Primitive(f"to-{shape_name}", lambda x: (new_shape_name, x[1]))
 
 
 def shift_creator(board_size=3):
@@ -65,40 +66,41 @@ def shift_creator(board_size=3):
     ]
     return [Primitive(f"shift{name}", f) for name, f in zip(shift_names, shift_funcs)]
 
+import re
+def flip(x):
+    items = re.findall(r'[0-9]+|[a-z]+', x[0])
+    angle=360-int(items[0])
+    return (str(angle)+items[1],x[1])
 
 if __name__ == "__main__":
     import dill
-
+    
     from datagen import BOARD_SIZE
 
     lib = Library(
         [
-            to_shape_creator("square"),
-            to_shape_creator("circle"),
-            to_shape_creator("triangle"),
-            to_shape_creator("delta"),
+            to_shape_creator("square",0),
+            to_shape_creator("circle",0),
+            to_shape_creator("triangle",0),
+            to_shape_creator("delta",0),
             Primitive(
                 "flip",
-                lambda x: ("triangle", x[1])
-                if x[0] == "delta"
-                else ("delta", x[1])
-                if x[0] == "triangle"
-                else x,
+                flip
             ),
             *shift_creator(BOARD_SIZE),
         ]
     )
 
-    dill.dump(lib, open("data/libraries/library0.pkl", "wb"))
+    dill.dump(lib, open("../data/libraries/library1.pkl", "wb"))
 
     print(lib)
 
-    p = ["shiftdown", "out", "shiftleft", "shiftdown", "out"]
+    p = ["to-square","flip","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
-    board = set([("delta", (1, 1))])
+    board = set([("0delta", (1, 1))])
     print(lib.apply_program(p, board))
 
-    dill.dump(
-        Library([*shift_creator(BOARD_SIZE)]),
-        open("data/libraries/shift_library0.pkl", "wb"),
-    )
+    # dill.dump(
+    #     Library([*shift_creator(BOARD_SIZE)]),
+    #     open("data/libraries/shift_library0.pkl", "wb"),
+    # )
