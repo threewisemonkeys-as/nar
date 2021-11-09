@@ -13,6 +13,14 @@ class Primitive:
     def name(self):
         return self._name
 
+class AffineTransform(Primitive):
+    def __init__(self,name,x,y):
+        self._name=name
+        self.x=x
+        self.y=y
+    
+    def apply(self,elem):
+        return (elem[0]+str(self.x)+str(self.y),elem[1])
 
 class Library:
     def __init__(self, primitives: list):
@@ -87,15 +95,16 @@ if __name__ == "__main__":
                 "flip",
                 flip
             ),
+            AffineTransform("affine",5,5),
             *shift_creator(BOARD_SIZE),
         ]
     )
 
-    dill.dump(lib, open("../data/libraries/library1.pkl", "wb"))
+    dill.dump(lib, open("../data/libraries/library2.pkl", "wb"))
 
     print(lib)
 
-    p = ["to-square","flip","out"]
+    p = ["affine","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
     board = set([("0delta", (1, 1))])
     print(lib.apply_program(p, board))
