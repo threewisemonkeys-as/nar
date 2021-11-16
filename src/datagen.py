@@ -12,6 +12,7 @@ if '/opt/ros/kinetic/lib/python2.7/dist-packages' in sys.path:
 
 from tqdm import tqdm
 from PIL import Image
+from sklearn.model_selection import train_test_split
 import numpy as np
 
 try:
@@ -217,7 +218,7 @@ def get_seen_unseen_split(shape_map: dict,test_size=0.2):
     limit = (IMG_SIZE[0] - SHAPE_IMG_SIZE[0], IMG_SIZE[1] - SHAPE_IMG_SIZE[1])
     positions=[(a,b) for a in range(limit[0]) for b in range(limit[1])]
     seen_pos,unseen_pos=train_test_split(positions,test_size=test_size)
-    return shapes,unseen_shapes,seen_pos,unseen_pos
+    return seen_shapes,unseen_shapes,seen_pos,unseen_pos
 
 def get_image_data(shapes,positions,shape_map,noise=False):
     images = []  
