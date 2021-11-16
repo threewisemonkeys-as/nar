@@ -100,13 +100,14 @@ if __name__ == "__main__":
         ]
     )
 
-    dill.dump(lib, open("../data/libraries/library2.pkl", "wb"))
+    # dill.dump(lib, open("../data/libraries/library2.pkl", "wb"))
+    lib = dill.load(open("../data/libraries/library2.pkl", "rb"))
 
     print(lib)
 
     p = ["affine","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
-    board = set([("0delta", (1, 1))])
+    board = set([("0circle", (0, 0))])
     print(lib.apply_program(p, board))
 
     # dill.dump(
