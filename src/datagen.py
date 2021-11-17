@@ -219,25 +219,29 @@ def get_seen_unseen_split(shape_map: dict,test_size=0.2):
     positions=[(a,b) for a in range(limit[0]) for b in range(limit[1])]
     seen_pos,unseen_pos=train_test_split(positions,test_size=test_size)
     return seen_shapes,unseen_shapes,seen_pos,unseen_pos
+    # return shapes,[],positions,[]
 
-def get_image_data(shapes,positions,shape_map,noise=False):
+def get_image_data(shapes,positions,shape_map,noise=False,noise_rate=1):
     images = []  
     for shape, pos in product(shapes, positions):
         shape_image=shape_map[shape]
         if noise:
             shape_array=np.array(shape_image)
             gauss_noise=np.random.normal(0,255*0.05,shape_array.shape)
+            indices = np.random.choice(gauss_noise.shape[1]*gauss_noise.shape[0], replace=False, size=int(gauss_noise.shape[1]*gauss_noise.shape[0]*(1-noise_rate)))
+            gauss_noise[np.unravel_index(indices, gauss_noise.shape)] = 0
             shape_array=np.uint16(shape_array)+gauss_noise
             shape_image=Image.fromarray(np.uint16(shape_array)).convert('RGB')
         bg = Image.new("RGB", IMG_SIZE, (255, 255, 255))
         bg.paste(shape_image, box=pos)
         images.append((bg, (shape, pos)))
+        break
     return images
 
 
 if __name__ == "__main__":
     shape_map = load_shape_map("../data/images")
     seen_shapes,unseen_shapes,seen_pos,unseen_pos=get_seen_unseen_split(shape_map)
-    images=get_image_data(seen_shapes,unseen_pos,shape_map,noise=True)
+    images=get_image_data(seen_shapes,seen_pos,shape_map,noise=True,noise_rate=0.3)
     print(len(images))
     images[0][0].show()
