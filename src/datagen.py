@@ -235,7 +235,6 @@ def get_image_data(shapes,positions,shape_map,noise=False,noise_rate=1):
         bg = Image.new("RGB", IMG_SIZE, (255, 255, 255))
         bg.paste(shape_image, box=pos)
         images.append((bg, (shape, pos)))
-        break
     return images
 
 
