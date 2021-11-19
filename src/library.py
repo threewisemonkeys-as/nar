@@ -24,7 +24,12 @@ class AffineTransform(Primitive):
         if(len(tokens)==2):
             return (elem[0]+str(self.x)+str(self.y),elem[1])
         else:
-            return (tokens[0]+tokens[1]+str(int(tokens[2])+self.x)+str(int(tokens[3])+self.y),elem[1])
+            ans=tokens[0]+tokens[1]
+            int x=int(tokens[2])+self.x
+            int y=tokens[3]+self.y
+            if(x==0 and y==0)
+                return ans
+            return ans+str(x)+str(y)
 
 class Library:
     def __init__(self, primitives: list):
