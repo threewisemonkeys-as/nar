@@ -20,7 +20,7 @@ class AffineTransform(Primitive):
         self.y=y
     
     def apply(self,elem):
-        tokens=re.findall(r'-?[0-9]|[a-z]+',elem[0])
+        tokens=re.findall(r'-?[0-9]+|[a-z]+',elem[0])
         if(len(tokens)==2):
             return (elem[0]+str(self.x)+str(self.y),elem[1])
         else:
@@ -110,9 +110,9 @@ if __name__ == "__main__":
 
     # print(lib)
 
-    p = ["affine+","affine-","affine+","out"]
+    p = ["affine+","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
-    board = set([("0circle", (0, 0))])
+    board = set([("270s", (0, 0))])
     print(lib.apply_program(p, board))
 
     # dill.dump(
