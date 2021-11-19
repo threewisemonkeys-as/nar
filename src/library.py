@@ -20,7 +20,11 @@ class AffineTransform(Primitive):
         self.y=y
     
     def apply(self,elem):
-        return (elem[0]+str(self.x)+str(self.y),elem[1])
+        tokens=re.findall(r'-?[0-9]|[a-z]+',elem[0])
+        if(len(tokens)==2):
+            return (elem[0]+str(self.x)+str(self.y),elem[1])
+        else:
+            return (tokens[0]+tokens[1]+str(int(tokens[2])+self.x)+str(int(tokens[3])+self.y),elem[1])
 
 class Library:
     def __init__(self, primitives: list):
@@ -95,17 +99,18 @@ if __name__ == "__main__":
                 "flip",
                 flip
             ),
-            AffineTransform("affine",5,5),
+            AffineTransform("affine+",5,5),
+            AffineTransform("affine-",-5,-5),
             *shift_creator(BOARD_SIZE),
         ]
     )
 
     # dill.dump(lib, open("../data/libraries/library2.pkl", "wb"))
-    lib = dill.load(open("../data/libraries/library2.pkl", "rb"))
+    # lib = dill.load(open("../data/libraries/library2.pkl", "rb"))
 
-    print(lib)
+    # print(lib)
 
-    p = ["affine","out"]
+    p = ["affine+","affine-","affine+","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
     board = set([("0circle", (0, 0))])
     print(lib.apply_program(p, board))
