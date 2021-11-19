@@ -20,14 +20,14 @@ class AffineTransform(Primitive):
         self.y=y
     
     def apply(self,elem):
-        tokens=re.findall(r'-?[0-9]+|[a-z]+',elem[0])
+        tokens=re.findall(r'0|90|180|270|-?[0-9]|[a-z]+',elem[0])
         if(len(tokens)==2):
             return (elem[0]+str(self.x)+str(self.y),elem[1])
         else:
             ans=tokens[0]+tokens[1]
-            int x=int(tokens[2])+self.x
-            int y=tokens[3]+self.y
-            if(x==0 and y==0)
+            x=int(tokens[2])+self.x
+            y=int(tokens[3])+self.y
+            if(x==0 and y==0):
                 return ans
             return ans+str(x)+str(y)
 
