@@ -12,7 +12,7 @@ if '/opt/ros/kinetic/lib/python2.7/dist-packages' in sys.path:
 
 from tqdm import tqdm
 from PIL import Image
-# from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split
 import numpy as np
 
 try:
