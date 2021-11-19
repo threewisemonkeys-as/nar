@@ -28,8 +28,8 @@ class AffineTransform(Primitive):
             x=int(tokens[2])+self.x
             y=int(tokens[3])+self.y
             if(x==0 and y==0):
-                return ans
-            return ans+str(x)+str(y)
+                return (ans,elem[1])
+            return (ans+str(x)+str(y),elem[1])
 
 class Library:
     def __init__(self, primitives: list):
@@ -115,9 +115,9 @@ if __name__ == "__main__":
 
     # print(lib)
 
-    p = ["affine+","out"]
+    p = ["affine-","affine+","out"]
     # board = set([("triangle", "mm"), ("triangle", "tl")])
-    board = set([("270s", (0, 0))])
+    board = set([("180delta", (0, 0))])
     print(lib.apply_program(p, board))
 
     # dill.dump(
