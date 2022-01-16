@@ -115,9 +115,9 @@ if __name__ == "__main__":
 
     # print(lib)
 
-    p = ["affine-","affine+","out"]
+    p = ['out', 'shiftup', 'affine+', 'out']
     # board = set([("triangle", "mm"), ("triangle", "tl")])
-    board = set([("180delta", (0, 0))])
+    board = set([("0x", (0, 1))])
     print(lib.apply_program(p, board))
 
     # dill.dump(
