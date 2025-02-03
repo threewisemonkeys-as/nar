@@ -2,6 +2,8 @@
 
 Neural Algorithms for Analogical Reasoning
 
+[Paper](https://ceur-ws.org/Vol-3212/paper9.pdf)
+
 ## Setup
 
 1. Setup an environment with `python>=3.8`.
